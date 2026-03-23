@@ -41,7 +41,7 @@ TABS_DIR    = Path(__file__).parent / "tabs"
 TAB_MANIFEST = [
     ("dashboard.py",      "DashboardTab"),
     ("configuration.py",  "ConfigurationTab"),
-    ("system_manager.py", "SystemManagerTab"),
+    ("system_manager_ui.py", "SystemManagerTab"),
     ("create_system.py",  "CreateSystemTab"),
     ("controls.py",       "ControlsTab"),
 ]
