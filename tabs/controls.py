@@ -35,6 +35,7 @@ from PyQt5.QtGui import (
     QLinearGradient, QRadialGradient, QPalette,
     QPolygon
 )
+from tabs.create_system import make_joytokey_cfg
 
 try:
     from main import TabModule
@@ -1081,10 +1082,40 @@ class ControlsTab(TabModule):
             try:
                 with open(path, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
+                self._save_system_joytokey_cfg()
                 if self.parent:
                     self.parent.statusBar().showMessage(f"✓ Perfil '{name}' guardado.", 4000)
             except Exception as e:
                 QMessageBox.critical(self.parent, "Error", str(e))
+
+    def _save_system_joytokey_cfg(self):
+        """Exporta también el perfil base de JoyToKey por sistema al guardar."""
+        system_name = (self._current_system or "").strip()
+        rl_dir = (self._config.get("rocketlauncher_dir", "") or "").strip()
+        if not system_name or not rl_dir:
+            return
+
+        joy_dir = os.path.join(rl_dir, "Profiles", "JoyToKey", system_name)
+        cfg_path = os.path.join(joy_dir, f"{system_name}.cfg")
+        content = make_joytokey_cfg(system_name)
+        os.makedirs(joy_dir, exist_ok=True)
+
+        if os.path.isfile(cfg_path):
+            try:
+                with open(cfg_path, "r", encoding="utf-8", errors="ignore") as f:
+                    current = f.read()
+                if current != content:
+                    ok = QMessageBox.question(
+                        self.parent, "JoyToKey existente",
+                        f"Ya existe:\n{cfg_path}\n\n¿Sobrescribir con la plantilla del sistema?",
+                        QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+                    if ok != QMessageBox.Yes:
+                        return
+            except Exception:
+                return
+
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            f.write(content)
 
     def _new_profile(self):
         name, ok = QInputDialog.getText(self.parent, "Nuevo perfil", "Nombre:")
