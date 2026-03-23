@@ -22,7 +22,7 @@ from PyQt5.QtWidgets import (
     QGroupBox, QScrollArea, QFrame, QTabWidget, QHeaderView,
     QMessageBox, QFileDialog, QProgressDialog, QAbstractItemView,
     QSizePolicy, QTextEdit, QDialog, QDialogButtonBox, QCheckBox,
-    QGridLayout, QProgressBar
+    QGridLayout, QProgressBar, QFormLayout, QMenu
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QColor, QFont, QBrush
@@ -1013,7 +1013,8 @@ def parse_xml_systems(xml_path: str) -> list:
     return systems
 
 
-def save_xml_games(xml_path: str, games: list, menu_name: str = "menu"):
+def save_xml_games(xml_path: str, games: list, menu_name: str = "menu",
+                   preserve_order: bool = False):
     """
     Escribe lista de juegos al formato XML de HyperSpin.
     Respeta el formato real: sin <header>, atributos index e image,
@@ -1023,8 +1024,12 @@ def save_xml_games(xml_path: str, games: list, menu_name: str = "menu"):
 
     root = ET.Element("menu")
 
-    sort_key = lambda g: (g.get("description") or g.get("name") or "").lower()
-    for g in sorted(games, key=sort_key):
+    entries = list(games)
+    if not preserve_order:
+        sort_key = lambda g: (g.get("description") or g.get("name") or "").lower()
+        entries.sort(key=sort_key)
+
+    for g in entries:
         attrs = {"name": g.get("name", "")}
         # Solo añadir index/image si tienen valor
         if g.get("index"):  attrs["index"] = g["index"]
@@ -1542,6 +1547,22 @@ def _remove_games_from_module_ini(ini_path: str, name_set: set) -> int:
     return removed
 
 
+def _read_module_ini(ini_path: str) -> configparser.RawConfigParser:
+    """Lee INI de módulo preservando claves no editadas."""
+    cfg = configparser.RawConfigParser(strict=False)
+    cfg.optionxform = str
+    try:
+        cfg.read(ini_path, encoding="utf-8")
+    except Exception:
+        cfg.read(ini_path, encoding="latin-1")
+    return cfg
+
+
+def _write_module_ini(ini_path: str, cfg: configparser.RawConfigParser) -> None:
+    with open(ini_path, "w", encoding="utf-8") as f:
+        cfg.write(f)
+
+
 # ─── Diálogo de eliminación de juego ─────────────────────────────────────────
 
 class RemoveGameDialog(QDialog):
@@ -1688,6 +1709,19 @@ class SystemManagerTab(TabModule):
         # INI Audit
         self._ini_service: Optional[IniAuditService] = None
         self._ini_worker:  Optional[IniRefreshWorker] = None
+        # Juegos/XML
+        self._games_data: list[dict] = []
+        self._games_cols: list[str] = []
+        self._games_dirty: bool = False
+        self._games_sort_col: int = 1
+        self._games_sort_order = Qt.AscendingOrder
+        # INI de módulo por juego
+        self._module_ini_path: str = ""
+        self._module_type: str = ""
+        self._module_fields: dict[str, QLineEdit] = {}
+        self._module_fields_order: list[str] = []
+        self._module_ini_dirty: bool = False
+        self._updating_module_fields: bool = False
 
     # ── API TabModule ──────────────────────────────────────────────────────────
 
@@ -1833,7 +1867,7 @@ class SystemManagerTab(TabModule):
         self.detail_tabs.addTab(self._build_folders_tab(),    "📁 Carpetas")
         self.detail_tabs.addTab(self._build_dbdiff_tab(),     "⚖ Base de datos")
         self.detail_tabs.addTab(self._build_audit_tab(),      "🔍 Auditoría media")
-        self.detail_tabs.addTab(self._build_games_tab(),      "🎮 Juegos")
+        self._games_tab_index = self.detail_tabs.addTab(self._build_games_tab(), "🎮 Juegos")
         self.detail_tabs.addTab(self._build_ini_audit_tab(),  "⚙ INI Audit")
         return self.detail_tabs
 
@@ -2027,6 +2061,10 @@ class SystemManagerTab(TabModule):
         self.btn_remove_game.clicked.connect(self._remove_game)
         self.btn_remove_game.setEnabled(False)
 
+        self.btn_toggle_enabled = QPushButton("⏻ Habilitar/Deshabilitar")
+        self.btn_toggle_enabled.clicked.connect(self._toggle_selected_games_enabled)
+        self.btn_toggle_enabled.setEnabled(False)
+
         self.btn_gen_from_roms = QPushButton("📂 Generar desde ROMs")
         self.btn_gen_from_roms.setObjectName("btn_primary")
         self.btn_gen_from_roms.clicked.connect(self._generate_from_roms)
@@ -2040,6 +2078,7 @@ class SystemManagerTab(TabModule):
         self.lbl_games_count.setStyleSheet("color: #3a4560; font-size: 12px;")
 
         for b in [self.btn_load_games, self.btn_add_game, self.btn_remove_game,
+                  self.btn_toggle_enabled,
                   self.btn_gen_from_roms, self.btn_save_games]:
             top_row.addWidget(b)
         top_row.addStretch()
@@ -2055,31 +2094,79 @@ class SystemManagerTab(TabModule):
         search_row.addStretch()
 
         # Tabla de juegos
-        GCOLS = ["name", "description", "year", "manufacturer", "genre", "rating"]
-        GCOLS_LABEL = ["ROM Name", "Descripción", "Año", "Fabricante", "Género", "Rating"]
+        GCOLS = ["name", "description", "year", "manufacturer", "genre", "rating", "enabled"]
+        GCOLS_LABEL = ["ROM Name", "Descripción", "Año", "Fabricante", "Género", "Rating", "Activo"]
         self.games_table = QTableWidget(0, len(GCOLS))
         self.games_table.setHorizontalHeaderLabels(GCOLS_LABEL)
         self.games_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.games_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         for i in range(2, len(GCOLS)):
             self.games_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeToContents)
+        self.games_table.setSortingEnabled(True)
         self.games_table.setEditTriggers(QAbstractItemView.DoubleClicked)
         self.games_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.games_table.itemChanged.connect(self._on_game_item_changed)
+        self.games_table.itemSelectionChanged.connect(self._on_games_selection_changed)
+        self.games_table.horizontalHeader().sortIndicatorChanged.connect(self._on_games_sort_changed)
         self.games_table.setStyleSheet(
             "QTableWidget { background: #0a0d12; border: 1px solid #1e2330; border-radius: 6px; }")
 
-        self._games_data: list[dict] = []
-        self._games_cols = GCOLS
-
         lay.addLayout(top_row)
         lay.addLayout(search_row)
-        lay.addWidget(self.games_table, 1)
+        body = QSplitter(Qt.Horizontal)
+        body.setChildrenCollapsible(False)
+        body.addWidget(self.games_table)
+        body.addWidget(self._build_module_ini_editor())
+        body.setSizes([900, 380])
+        lay.addWidget(body, 1)
+
+        self._games_cols = GCOLS
         return w
+
+    def _build_module_ini_editor(self) -> QWidget:
+        panel = QGroupBox("INI de módulo (juego seleccionado)")
+        panel.setMinimumWidth(330)
+        lay = QVBoxLayout(panel)
+        lay.setSpacing(8)
+
+        self.lbl_module_info = QLabel("Selecciona un juego para editar su INI de módulo.")
+        self.lbl_module_info.setWordWrap(True)
+        self.lbl_module_info.setStyleSheet("color:#5a6278;font-size:12px;")
+        lay.addWidget(self.lbl_module_info)
+
+        self.module_form = QFormLayout()
+        self.module_form.setLabelAlignment(Qt.AlignRight)
+        lay.addLayout(self.module_form)
+
+        self._module_field_rows: dict[str, tuple[QLabel, QLineEdit]] = {}
+        for key in ["Application", "FadeTitle", "ExitMethod", "AppWaitExe",
+                    "PostLaunch", "PostExit", "ShortName", "CommandLine", "GamePath"]:
+            lbl = QLabel(f"{key}:")
+            edit = QLineEdit()
+            edit.textChanged.connect(self._on_module_ini_field_changed)
+            self.module_form.addRow(lbl, edit)
+            self._module_field_rows[key] = (lbl, edit)
+            lbl.hide()
+            edit.hide()
+
+        btns = QHBoxLayout()
+        self.btn_module_ini_save = QPushButton("Guardar INI módulo")
+        self.btn_module_ini_save.setEnabled(False)
+        self.btn_module_ini_save.clicked.connect(self._save_module_ini_for_selected_game)
+        self.btn_module_ini_reload = QPushButton("Recargar INI")
+        self.btn_module_ini_reload.setEnabled(False)
+        self.btn_module_ini_reload.clicked.connect(self._load_module_ini_for_selected_game)
+        btns.addWidget(self.btn_module_ini_save)
+        btns.addWidget(self.btn_module_ini_reload)
+        lay.addLayout(btns)
+        lay.addStretch()
+        return panel
 
     # ── Carga de sistemas ──────────────────────────────────────────────────────
 
     def _reload_systems(self):
+        if not self._confirm_discard_pending_changes():
+            return
         cfg    = self._config
         hs_dir = cfg.get("hyperspin_dir", "")
         self._systems = []
@@ -2156,6 +2243,11 @@ class SystemManagerTab(TabModule):
     def _on_system_selected(self, current, previous):
         if not current:
             return
+        if not self._confirm_discard_pending_changes():
+            self.system_list.blockSignals(True)
+            self.system_list.setCurrentItem(previous)
+            self.system_list.blockSignals(False)
+            return
         sys_data = current.data(0, Qt.UserRole)
         if not sys_data:
             return
@@ -2177,6 +2269,7 @@ class SystemManagerTab(TabModule):
         self.btn_audit.setEnabled(True)
         self.btn_add_game.setEnabled(True)
         self.btn_remove_game.setEnabled(True)
+        self.btn_toggle_enabled.setEnabled(True)
         self.btn_gen_from_roms.setEnabled(True)
         self.btn_save_games.setEnabled(True)
         self._load_games()
@@ -2696,17 +2789,82 @@ class SystemManagerTab(TabModule):
 
     # ── Gestión de juegos ──────────────────────────────────────────────────────
 
+    def _set_games_dirty(self, dirty: bool):
+        self._games_dirty = dirty
+        if hasattr(self, "detail_tabs") and hasattr(self, "_games_tab_index"):
+            title = "🎮 Juegos*" if dirty else "🎮 Juegos"
+            self.detail_tabs.setTabText(self._games_tab_index, title)
+
+    def _confirm_discard_pending_changes(self) -> bool:
+        if not self._games_dirty and not self._module_ini_dirty:
+            return True
+        msg = QMessageBox(self.parent)
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle("Cambios sin guardar")
+        msg.setText("Hay cambios pendientes.")
+        msg.setInformativeText("¿Quieres guardarlos antes de continuar?")
+        msg.setStandardButtons(QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
+        msg.setDefaultButton(QMessageBox.Save)
+        res = msg.exec_()
+        if res == QMessageBox.Cancel:
+            return False
+        if res == QMessageBox.Save:
+            if self._module_ini_dirty:
+                self._save_module_ini_for_selected_game()
+                if self._module_ini_dirty:
+                    return False
+            if self._games_dirty:
+                self._save_games_xml()
+                return not self._games_dirty
+        return True
+
+    def _sync_games_data_from_table(self):
+        synced = []
+        for r in range(self.games_table.rowCount()):
+            row_data = {}
+            for c, key in enumerate(self._games_cols):
+                item = self.games_table.item(r, c)
+                row_data[key] = item.text().strip() if item else ""
+            synced.append(row_data)
+        self._games_data = synced
+
+    def _save_current_games_xml(self, show_status: bool = True) -> bool:
+        sys_name = self._current_system
+        if not sys_name:
+            return False
+        hs_dir = self._config.get("hyperspin_dir", "")
+        if not hs_dir:
+            return False
+        xml_path = os.path.join(hs_dir, "Databases", sys_name, f"{sys_name}.xml")
+        os.makedirs(os.path.dirname(xml_path), exist_ok=True)
+        self._sync_games_data_from_table()
+        try:
+            save_xml_games(xml_path, self._games_data, preserve_order=True)
+            self._set_games_dirty(False)
+            if show_status and self.parent:
+                self.parent.statusBar().showMessage(f"✓ XML guardado: {xml_path}", 5000)
+            return True
+        except Exception as e:
+            QMessageBox.critical(self.parent, "Error al guardar XML", f"No se pudo guardar el XML.\n{e}")
+            return False
+
     def _load_games(self):
         sys_name = self._current_system
         if not sys_name:
+            return
+        if not self._confirm_discard_pending_changes():
             return
         hs_dir  = self._config.get("hyperspin_dir", "")
         xml_path = os.path.join(hs_dir, "Databases", sys_name, f"{sys_name}.xml")
         self._games_data = parse_xml_games(xml_path)
         self._populate_games_table(self._games_data)
+        self._set_games_dirty(False)
+        self._module_ini_dirty = False
+        self._load_module_ini_for_selected_game()
 
     def _populate_games_table(self, games: list):
         self.games_table.blockSignals(True)
+        self.games_table.setSortingEnabled(False)
         self.games_table.setRowCount(len(games))
         for r, g in enumerate(games):
             for c, key in enumerate(self._games_cols):
@@ -2721,6 +2879,8 @@ class SystemManagerTab(TabModule):
                         val = "No"
                 item = QTableWidgetItem(str(val) if val is not None else "")
                 self.games_table.setItem(r, c, item)
+        self.games_table.setSortingEnabled(True)
+        self.games_table.sortItems(self._games_sort_col, self._games_sort_order)
         self.games_table.blockSignals(False)
         self.lbl_games_count.setText(f"{len(games)} juegos")
 
@@ -2737,11 +2897,134 @@ class SystemManagerTab(TabModule):
             self.games_table.setRowHidden(r, not visible)
 
     def _on_game_item_changed(self, item: QTableWidgetItem):
-        row = item.row()
-        col = item.column()
-        if row < len(self._games_data) and col < len(self._games_cols):
-            key = self._games_cols[col]
-            self._games_data[row][key] = item.text()
+        self._set_games_dirty(True)
+
+    def _on_games_sort_changed(self, col: int, order):
+        self._games_sort_col = col
+        self._games_sort_order = order
+
+    def _on_games_selection_changed(self):
+        self._load_module_ini_for_selected_game()
+
+    def _get_selected_game_name(self) -> str:
+        rows = sorted({i.row() for i in self.games_table.selectedIndexes()})
+        if not rows:
+            return ""
+        item = self.games_table.item(rows[0], 0)
+        return item.text().strip() if item else ""
+
+    def _toggle_selected_games_enabled(self):
+        rows = sorted({i.row() for i in self.games_table.selectedIndexes()})
+        if not rows:
+            return
+        changed = 0
+        self.games_table.blockSignals(True)
+        enabled_col = self._games_cols.index("enabled")
+        for r in rows:
+            item = self.games_table.item(r, enabled_col)
+            old_val = item.text().strip().lower() if item else "yes"
+            new_val = "No" if old_val in ("yes", "1", "true") else "Yes"
+            if item is None:
+                item = QTableWidgetItem(new_val)
+                self.games_table.setItem(r, enabled_col, item)
+            else:
+                item.setText(new_val)
+            changed += 1
+        self.games_table.blockSignals(False)
+        self._sync_games_data_from_table()
+        self._set_games_dirty(True)
+        if self.parent:
+            self.parent.statusBar().showMessage(
+                f"✓ {changed} juego(s) actualizado(s) (habilitar/deshabilitar)", 4000)
+
+    def _resolve_module_ini_context(self) -> tuple[str, str]:
+        sys_name = self._current_system
+        rl_dir = self._config.get("rocketlauncher_dir", "")
+        if not sys_name or not rl_dir:
+            return "", ""
+        ini_path = os.path.join(rl_dir, "Settings", sys_name, f"{sys_name}.ini")
+        emu_ini = os.path.join(rl_dir, "Settings", sys_name, "Emulators.ini")
+        emu_info = self._get_emulator_info(emu_ini)
+        module_file = (emu_info.get("module_file") or "").lower()
+        module_type = ""
+        if "pclauncher" in module_file:
+            module_type = "pclauncher"
+        elif "teknoparrot" in module_file:
+            module_type = "teknoparrot"
+        return ini_path, module_type
+
+    def _on_module_ini_field_changed(self):
+        if getattr(self, "_updating_module_fields", False):
+            return
+        self._module_ini_dirty = True
+
+    def _visible_module_keys(self, cfg: configparser.RawConfigParser, section: str, module_type: str) -> list[str]:
+        if module_type == "pclauncher":
+            keys = ["Application", "FadeTitle", "ExitMethod"]
+            keys += [k for k in ["AppWaitExe", "PostLaunch", "PostExit"] if cfg.has_option(section, k)]
+            return keys
+        if module_type == "teknoparrot":
+            return ["ShortName", "FadeTitle", "CommandLine", "GamePath"]
+        return []
+
+    def _load_module_ini_for_selected_game(self):
+        game_name = self._get_selected_game_name()
+        ini_path, module_type = self._resolve_module_ini_context()
+        self._module_ini_path = ini_path
+        self._module_type = module_type
+
+        if self._module_ini_dirty:
+            if not self._confirm_discard_pending_changes():
+                return
+
+        self.btn_module_ini_reload.setEnabled(bool(game_name and os.path.isfile(ini_path)))
+        self.btn_module_ini_save.setEnabled(bool(game_name and os.path.isfile(ini_path)))
+        self._module_ini_dirty = False
+
+        for key, (lbl, edit) in self._module_field_rows.items():
+            lbl.hide()
+            edit.hide()
+            edit.setText("")
+
+        if not game_name:
+            self.lbl_module_info.setText("Selecciona un juego para editar su INI de módulo.")
+            return
+        if not module_type or not os.path.isfile(ini_path):
+            self.lbl_module_info.setText("Módulo no compatible o INI no encontrado (solo PCLauncher/TeknoParrot).")
+            return
+
+        cfg = _read_module_ini(ini_path)
+        if not cfg.has_section(game_name):
+            self.lbl_module_info.setText(f"El juego '{game_name}' no tiene sección en {os.path.basename(ini_path)}.")
+            return
+
+        self._updating_module_fields = True
+        keys = self._visible_module_keys(cfg, game_name, module_type)
+        self._module_fields_order = keys
+        self.lbl_module_info.setText(
+            f"Sistema: {self._current_system} · Juego: {game_name} · Módulo: {module_type}")
+        for key in keys:
+            lbl, edit = self._module_field_rows[key]
+            lbl.show()
+            edit.show()
+            edit.setText(cfg.get(game_name, key, fallback=""))
+        self._updating_module_fields = False
+
+    def _save_module_ini_for_selected_game(self):
+        game_name = self._get_selected_game_name()
+        ini_path, module_type = self._resolve_module_ini_context()
+        if not game_name or not ini_path or not os.path.isfile(ini_path) or not module_type:
+            return
+        cfg = _read_module_ini(ini_path)
+        if not cfg.has_section(game_name):
+            cfg.add_section(game_name)
+        for key in self._module_fields_order:
+            _, edit = self._module_field_rows[key]
+            cfg.set(game_name, key, edit.text().strip())
+        _write_module_ini(ini_path, cfg)
+        self._module_ini_dirty = False
+        if self.parent:
+            self.parent.statusBar().showMessage(f"✓ INI guardado: {ini_path}", 5000)
 
     def _add_game_dialog(self):
         dlg = QDialog(self.parent)
@@ -2782,6 +3065,7 @@ class SystemManagerTab(TabModule):
             self._games_data.append(new_game)
             self._games_data.sort(key=lambda x: x.get("description", "").lower())
             self._populate_games_table(self._games_data)
+            self._set_games_dirty(True)
 
     def _remove_game(self):
         """
@@ -2790,6 +3074,7 @@ class SystemManagerTab(TabModule):
           A) Solo de HyperSpin (solo de la lista en memoria, requiere Guardar XML)
           B) De HyperSpin Y de RocketLauncherUI (borra de ambas bases de datos en disco)
         """
+        self._sync_games_data_from_table()
         rows  = sorted({i.row() for i in self.games_table.selectedIndexes()})
         if not rows:
             return
@@ -2822,6 +3107,7 @@ class SystemManagerTab(TabModule):
             if r < len(self._games_data):
                 del self._games_data[r]
         self._populate_games_table(self._games_data)
+        self._set_games_dirty(True)
 
         results = [f"Eliminado de HyperSpin (XML en memoria): {n} juego(s)"]
 
@@ -2831,7 +3117,8 @@ class SystemManagerTab(TabModule):
         hs_xml   = os.path.join(hs_dir, "Databases", sys_name, f"{sys_name}.xml")
         if hs_dir and sys_name:
             try:
-                save_xml_games(hs_xml, self._games_data)
+                save_xml_games(hs_xml, self._games_data, preserve_order=True)
+                self._set_games_dirty(False)
                 results.append(f"✓ HyperSpin XML guardado: {hs_xml}")
             except Exception as e:
                 results.append(f"✗ Error guardando HS XML: {e}")
@@ -2851,7 +3138,7 @@ class SystemManagerTab(TabModule):
                         rl_after = [g for g in rl_games
                                     if g["name"].lower() not in name_set]
                         removed  = len(rl_games) - len(rl_after)
-                        save_xml_games(rlui_xml, rl_after)
+                        save_xml_games(rlui_xml, rl_after, preserve_order=True)
                         results.append(
                             f"✓ RLUI XML: {removed} juego(s) eliminado(s) — {rlui_xml}")
                     except Exception as e:
@@ -2926,6 +3213,7 @@ class SystemManagerTab(TabModule):
             self._games_data.sort(key=lambda x: x.get("description", "").lower())
 
         self._populate_games_table(self._games_data)
+        self._set_games_dirty(True)
         QMessageBox.information(self.parent, "Completado",
                                 f"Base de datos generada con {len(self._games_data)} juegos.")
 
@@ -2933,27 +3221,7 @@ class SystemManagerTab(TabModule):
         sys_name = self._current_system
         if not sys_name:
             return
-        hs_dir   = self._config.get("hyperspin_dir", "")
-        xml_path = os.path.join(hs_dir, "Databases", sys_name, f"{sys_name}.xml")
-        os.makedirs(os.path.dirname(xml_path), exist_ok=True)
-
-        # Recoger valores editados de la tabla
-        for r in range(self.games_table.rowCount()):
-            if r < len(self._games_data):
-                for c, key in enumerate(self._games_cols):
-                    item = self.games_table.item(r, c)
-                    if item:
-                        self._games_data[r][key] = item.text()
-
-        try:
-            save_xml_games(xml_path, self._games_data)
-            if self.parent:
-                self.parent.statusBar().showMessage(f"✓ XML guardado: {xml_path}", 5000)
-        except Exception as e:
-            QMessageBox.critical(
-                self.parent, "Error al guardar XML",
-                f"No se pudo guardar el XML.\n{e}"
-            )
+        self._save_current_games_xml(show_status=True)
 
     # ═══════════════════════════════════════════════════════════════════════════
     # INI AUDIT TAB — Auditor y clasificador de HyperSpin/Settings
