@@ -795,6 +795,17 @@ def detect_tp_window_class(games_ini_path: str) -> str:
     return "Qt5152QWindowIcon"  # default
 
 
+# Reutilizar implementación compartida de helpers de módulo.
+from core.module_ini_helpers import (
+    append_pclauncher_game as append_pclauncher_game,
+    append_teknoparrot_game as append_teknoparrot_game,
+    detect_tp_window_class as detect_tp_window_class,
+    parse_pclauncher_games_ini as parse_pclauncher_games_ini,
+    parse_teknoparrot_games_ini as parse_teknoparrot_games_ini,
+)
+from core.rl_ini_helpers import get_module_ini_path as get_module_ini_path
+
+
 def make_rl_emulators_ini_pclauncher(system_name: str, rl_dir: str = "") -> str:
     r"""
     Emulators.ini especializado para sistemas PCLauncher.

@@ -5,6 +5,38 @@ from __future__ import annotations
 import os
 import re
 import xml.etree.ElementTree as ET
+from typing import Any
+
+
+_XML_CACHE: dict[tuple[str, str], tuple[float, int, Any]] = {}
+
+
+def _get_cached(kind: str, xml_path: str):
+    try:
+        st = os.stat(xml_path)
+    except OSError:
+        return None
+    key = (kind, os.path.abspath(xml_path))
+    cached = _XML_CACHE.get(key)
+    if not cached:
+        return None
+    cached_mtime, cached_size, cached_value = cached
+    if cached_mtime == st.st_mtime and cached_size == st.st_size:
+        return cached_value
+    return None
+
+
+def _set_cached(kind: str, xml_path: str, value: Any):
+    try:
+        st = os.stat(xml_path)
+    except OSError:
+        return
+    key = (kind, os.path.abspath(xml_path))
+    _XML_CACHE[key] = (st.st_mtime, st.st_size, value)
+
+
+def clear_xml_cache():
+    _XML_CACHE.clear()
 
 
 def _normalize_enabled(val: str) -> bool:
@@ -24,6 +56,10 @@ def _parse_xml_safe(xml_path: str):
 
 
 def parse_xml_games(xml_path: str) -> list[dict]:
+    cached = _get_cached("games", xml_path)
+    if cached is not None:
+        return [dict(row) for row in cached]
+
     games = []
     root = _parse_xml_safe(xml_path)
     if root is None:
@@ -51,10 +87,15 @@ def parse_xml_games(xml_path: str) -> list[dict]:
                 "exe": game.get("exe", "").strip(),
             }
         )
+    _set_cached("games", xml_path, tuple(games))
     return games
 
 
 def parse_xml_systems(xml_path: str) -> list[dict]:
+    cached = _get_cached("systems", xml_path)
+    if cached is not None:
+        return [dict(row) for row in cached]
+
     systems = []
     root = _parse_xml_safe(xml_path)
     if root is None:
@@ -76,6 +117,7 @@ def parse_xml_systems(xml_path: str) -> list[dict]:
                 "exe": game.get("exe", "").strip(),
             }
         )
+    _set_cached("systems", xml_path, tuple(systems))
     return systems
 
 
@@ -102,6 +144,7 @@ def save_xml_games(xml_path: str, games: list[dict], menu_name: str = "menu"):
     tree = ET.ElementTree(root)
     ET.indent(tree, space="\t")
     tree.write(xml_path, encoding="UTF-8", xml_declaration=True)
+    clear_xml_cache()
 
 
 def _append_system_element(parent: ET.Element, data: dict):
@@ -148,6 +191,7 @@ def save_xml_systems(xml_path: str, systems: list[dict], include_comments: bool 
     with open(xml_path, "w", encoding="utf-8") as fh:
         fh.write("<?xml version='1.0' encoding='utf-8'?>\n")
         fh.write(ET.tostring(root, encoding="unicode"))
+    clear_xml_cache()
 
 
 def xml_game_count(xml_path: str) -> int:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import configparser
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 
 def _read_ini(path: str) -> configparser.RawConfigParser | None:
@@ -34,12 +34,13 @@ def parse_rl_emulators_ini(ini_path: str) -> dict:
             continue
 
         module_raw = cfg.get(section, "Module", fallback="").strip()
+        module_path = PureWindowsPath(module_raw) if module_raw else None
         result["emulators"][section] = {
             "emu_path": cfg.get(section, "Emu_Path", fallback="").strip(),
             "rom_extension": cfg.get(section, "Rom_Extension", fallback="").strip(),
             "module_raw": module_raw,
-            "module_file": Path(module_raw).name if module_raw else "",
-            "module_folder": Path(module_raw).parent.name if module_raw else "",
+            "module_file": module_path.name if module_path else "",
+            "module_folder": module_path.parent.name if module_path else "",
             "virtual": cfg.get(section, "Virtual_Emulator", fallback="false").lower() == "true",
         }
     return result
