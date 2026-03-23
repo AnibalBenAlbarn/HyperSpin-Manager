@@ -22,10 +22,12 @@ from PyQt5.QtWidgets import (
     QGroupBox, QScrollArea, QFrame, QTabWidget, QHeaderView,
     QMessageBox, QFileDialog, QProgressDialog, QAbstractItemView,
     QSizePolicy, QTextEdit, QDialog, QDialogButtonBox, QCheckBox,
-    QGridLayout, QProgressBar, QFormLayout, QMenu
+    QGridLayout, QProgressBar, QFormLayout, QMenu, QInputDialog,
+    QListWidget
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QColor, QFont, QBrush
+from utils import mainmenu_utils
 
 try:
     from main import TabModule
@@ -605,12 +607,30 @@ class IniAuditService:
             "systems": {name: rec.to_dict() for name, rec in self.records.items()}
         }
         try:
-            with open(self.registry_path, "w", encoding="utf-8") as f:
+            os.makedirs(os.path.dirname(self.registry_path) or ".", exist_ok=True)
+            tmp_path = self.registry_path + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_path, self.registry_path)
             return True
         except Exception as e:
             print(f"[ERROR] No se pudo guardar registry: {e}")
             return False
+
+    def _build_record_for_system(self, name: str) -> SystemIniRecord:
+        ini_path = os.path.join(self.settings_dir, f"{name}.ini")
+        if os.path.isfile(ini_path):
+            data = HyperSpinIniData(ini_path).parse()
+            ini_type = IniClassifier.classify(data)
+        else:
+            data = HyperSpinIniData(ini_path)
+            data.name = name
+            data.filename = f"{name}.ini"
+            ini_type = INI_TYPE_REAL
+        rec = SystemIniRecord(data, ini_type)
+        self._fill_paths(rec)
+        self._audit(rec)
+        return rec
 
     # -- Escaneo principal ----------------------------------------------------
 
@@ -660,6 +680,71 @@ class IniAuditService:
             "hidden":        sum(1 for r in self.records.values() if r.hidden_in_app),
         }
         self.save_registry()
+        return stats
+
+    def _compute_stats(self) -> dict:
+        return {
+            "total":         len(self.records),
+            "by_type":       dict(Counter(r.type for r in self.records.values())),
+            "with_errors":   sum(1 for r in self.records.values() if r.audit.errors),
+            "with_warnings": sum(1 for r in self.records.values() if r.audit.warnings),
+            "hidden":        sum(1 for r in self.records.values() if r.hidden_in_app),
+        }
+
+    def import_from_rocketlauncher(self, progress_callback=None) -> dict:
+        """
+        Importa sistemas existentes en RocketLauncher/Settings al registro.
+        No duplica sistemas que ya estén registrados.
+        """
+        if not self.rl_dir:
+            return {"error": "RocketLauncher no está configurado."}
+        settings_root = os.path.join(self.rl_dir, "Settings")
+        if not os.path.isdir(settings_root):
+            return {"error": f"No existe: {settings_root}"}
+
+        # Cargar estado previo y completar records actuales si están vacíos.
+        self.load_registry()
+        if not self.records:
+            self.refresh()
+
+        candidates = sorted(
+            d for d in os.listdir(settings_root)
+            if os.path.isdir(os.path.join(settings_root, d))
+            and d.lower() not in {"global", "_global", "default"}
+        )
+        imported = 0
+        skipped = 0
+        for idx, name in enumerate(candidates, start=1):
+            if progress_callback:
+                try:
+                    progress_callback(idx, len(candidates), name)
+                except Exception:
+                    pass
+            if name in self.records:
+                skipped += 1
+                continue
+
+            rec = self._build_record_for_system(name)
+            # Clasificación orientada a RL cuando falta INI de HyperSpin.
+            if not os.path.isfile(rec.paths.get("ini", "")):
+                emu_ini = os.path.join(settings_root, name, "Emulators.ini")
+                emu_data = parse_rl_emulators_ini(emu_ini)
+                default_emu = emu_data.get("default_emulator", "")
+                module = ""
+                if default_emu and default_emu in emu_data.get("emulators", {}):
+                    module = emu_data["emulators"][default_emu].get("module_file", "").lower()
+                if any(x in module for x in ("pclauncher", "teknoparrot", "pc game")):
+                    rec.type = INI_TYPE_EXTERNAL
+                else:
+                    rec.type = INI_TYPE_REAL
+                rec.audit.warnings.append("Importado desde RL Settings (sin INI de HyperSpin).")
+
+            self.records[name] = rec
+            imported += 1
+
+        self.save_registry()
+        stats = self._compute_stats()
+        stats.update({"imported": imported, "skipped": skipped, "scanned_rl": len(candidates)})
         return stats
 
     def _fill_paths(self, rec: SystemIniRecord):
@@ -778,7 +863,9 @@ class IniAuditService:
         if options.get("delete_xml"):    _rm_dir(os.path.dirname(rec.paths["xml"]), "carpeta XML")
         if options.get("delete_media"):  _rm_dir(rec.paths["media"], "media")
         if options.get("delete_rl"):     _rm_dir(rec.paths["rocketlauncher_settings"], "RL Settings")
-        if options.get("delete_bezels"): _rm_dir(rec.paths["bezels"], "Bezels")
+        if options.get("delete_bezels"):
+            _rm_dir(rec.paths["bezels"], "Bezels")
+            _rm_dir(rec.paths.get("fade", ""), "Fade")
 
         del self.records[name]
         self.save_registry()
@@ -812,6 +899,21 @@ class IniRefreshWorker(QThread):
         def cb(done, total, name):
             self.progress.emit(int(done * 100 / max(total, 1)), name)
         stats = self.service.refresh(progress_callback=cb)
+        self.finished.emit(stats)
+
+
+class ImportWorker(QThread):
+    progress = pyqtSignal(int, str)
+    finished = pyqtSignal(dict)
+
+    def __init__(self, service: IniAuditService):
+        super().__init__()
+        self.service = service
+
+    def run(self):
+        def cb(done, total, name):
+            self.progress.emit(int(done * 100 / max(total, 1)), name)
+        stats = self.service.import_from_rocketlauncher(progress_callback=cb)
         self.finished.emit(stats)
 
 
@@ -1805,6 +1907,7 @@ class SystemManagerTab(TabModule):
         # INI Audit
         self._ini_service: Optional[IniAuditService] = None
         self._ini_worker:  Optional[IniRefreshWorker] = None
+        self._import_worker: Optional[ImportWorker] = None
         # Juegos/XML
         self._games_data: list[dict] = []
         self._games_cols: list[str] = []
@@ -1951,10 +2054,58 @@ class SystemManagerTab(TabModule):
             }
         """)
         self.system_list.currentItemChanged.connect(self._on_system_selected)
+        self.system_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.system_list.customContextMenuRequested.connect(self._on_system_list_context_menu)
 
         lay.addWidget(hdr)
         lay.addWidget(self.system_list, 1)
         return w
+
+    def _on_system_list_context_menu(self, pos):
+        item = self.system_list.itemAt(pos)
+        if not item:
+            return
+        menu = QMenu(self.system_list)
+        menu.addAction("Eliminar sistema…").triggered.connect(self._delete_selected_system_from_main_list)
+        menu.exec_(self.system_list.viewport().mapToGlobal(pos))
+
+    def _delete_selected_system_from_main_list(self):
+        item = self.system_list.currentItem()
+        if not item:
+            return
+        sys_data = item.data(0, Qt.UserRole) or {}
+        name = sys_data.get("name", "").strip()
+        if not name:
+            return
+
+        if not self._ini_service:
+            self._ini_service = IniAuditService(self._config or {})
+        rec = self._ini_service.records.get(name) if self._ini_service else None
+        if not rec and self._ini_service:
+            rec = self._ini_service._build_record_for_system(name)
+
+        if not rec:
+            QMessageBox.warning(self.parent, "Error", f"No se pudo cargar el sistema '{name}'.")
+            return
+
+        dlg = DeleteSystemDialog(rec, parent=self.parent)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+
+        if dlg.mode == DeleteSystemDialog.MODE_HIDE:
+            self._ini_service.hide_in_app(name)
+            msg = f"Sistema '{name}' ocultado en la app."
+        else:
+            actions = self._ini_service.delete_real(name, dlg.options)
+            QMessageBox.information(
+                self.parent, "Resultado del borrado",
+                f"Acciones para '{name}':\n\n" + "\n".join(actions))
+            msg = f"Sistema '{name}' eliminado."
+
+        self._reload_systems()
+        self._ini_populate_tree()
+        if self.parent:
+            self.parent.statusBar().showMessage(msg, 6000)
 
     def _build_detail_tabs(self) -> QTabWidget:
         self.detail_tabs = QTabWidget()
@@ -1965,6 +2116,7 @@ class SystemManagerTab(TabModule):
         self.detail_tabs.addTab(self._build_audit_tab(),      "🔍 Auditoría media")
         self._games_tab_index = self.detail_tabs.addTab(self._build_games_tab(), "🎮 Juegos")
         self.detail_tabs.addTab(self._build_ini_audit_tab(),  "⚙ INI Audit")
+        self.detail_tabs.addTab(self._build_mainmenu_tab(),   "📚 Main Menu")
         return self.detail_tabs
 
     # ── Tab: Carpetas ──────────────────────────────────────────────────────────
@@ -2301,12 +2453,21 @@ class SystemManagerTab(TabModule):
     def _filter_systems(self):
         genre_filter  = self.cmb_genre.currentText()
         search_filter = self.inp_search.text().lower()
+        hidden_systems = set()
+        if self._ini_service:
+            self._ini_service.load_registry()
+            hidden_systems = {
+                n for n, d in self._ini_service._saved_state.get("systems", {}).items()
+                if d.get("hidden_in_app", False)
+            }
 
         self.system_list.clear()
         count = 0
         for sys in self._systems:
             name  = sys.get("name", "")
             genre = sys.get("genre", "")
+            if name in hidden_systems:
+                continue
             if genre_filter != "Todos" and genre_filter.lower() not in genre.lower():
                 continue
             if search_filter and search_filter not in name.lower():
@@ -3353,6 +3514,173 @@ class SystemManagerTab(TabModule):
             return
         self._save_current_games_xml(show_status=True)
 
+    # ── Tab: Main Menu ────────────────────────────────────────────────────────
+
+    def _build_mainmenu_tab(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(12)
+
+        self.lbl_mainmenu_status = QLabel("Configura HyperSpin para gestionar el Main Menu.")
+        self.lbl_mainmenu_status.setWordWrap(True)
+        self.lbl_mainmenu_status.setStyleSheet("color:#5a6278;font-size:12px;")
+
+        btn_row = QHBoxLayout()
+        self.btn_mm_refresh = QPushButton("⟳ Recargar")
+        self.btn_mm_refresh.clicked.connect(self._mainmenu_refresh)
+        self.btn_mm_to_mmc = QPushButton("Main Menu.xml → All/Categories")
+        self.btn_mm_to_mmc.clicked.connect(self._mainmenu_convert_to_mmc)
+        self.btn_mm_to_classic = QPushButton("All/Categories → Main Menu.xml")
+        self.btn_mm_to_classic.clicked.connect(self._mainmenu_convert_to_classic)
+        self.btn_mm_sync = QPushButton("Sincronizar categorías")
+        self.btn_mm_sync.clicked.connect(self._mainmenu_sync_categories)
+        for b in [self.btn_mm_refresh, self.btn_mm_to_mmc, self.btn_mm_to_classic, self.btn_mm_sync]:
+            btn_row.addWidget(b)
+        btn_row.addStretch()
+
+        split = QSplitter(Qt.Horizontal)
+        split.setHandleWidth(1)
+        split.setStyleSheet("QSplitter::handle{background:#1e2330;}")
+
+        cat_box = QGroupBox("Categorías (Categories.xml)")
+        cat_lay = QVBoxLayout(cat_box)
+        self.lst_mm_categories = QListWidget()
+        cat_lay.addWidget(self.lst_mm_categories, 1)
+        cat_btns = QHBoxLayout()
+        btn_cat_add = QPushButton("+ Añadir")
+        btn_cat_add.clicked.connect(self._mainmenu_add_category)
+        btn_cat_del = QPushButton("− Quitar")
+        btn_cat_del.setObjectName("btn_danger")
+        btn_cat_del.clicked.connect(self._mainmenu_remove_category)
+        btn_cat_up = QPushButton("↑")
+        btn_cat_up.clicked.connect(lambda: self._mainmenu_reorder_categories(-1))
+        btn_cat_down = QPushButton("↓")
+        btn_cat_down.clicked.connect(lambda: self._mainmenu_reorder_categories(1))
+        for b in [btn_cat_add, btn_cat_del, btn_cat_up, btn_cat_down]:
+            cat_btns.addWidget(b)
+        cat_btns.addStretch()
+        cat_lay.addLayout(cat_btns)
+
+        sw_box = QGroupBox("Sub-wheels detectados")
+        sw_lay = QVBoxLayout(sw_box)
+        self.lst_mm_subwheels = QListWidget()
+        sw_lay.addWidget(self.lst_mm_subwheels, 1)
+
+        split.addWidget(cat_box)
+        split.addWidget(sw_box)
+        split.setSizes([520, 420])
+
+        lay.addWidget(self.lbl_mainmenu_status)
+        lay.addLayout(btn_row)
+        lay.addWidget(split, 1)
+        QTimer.singleShot(0, self._mainmenu_refresh)
+        return w
+
+    def _mainmenu_get_info(self):
+        hs_dir = self._config.get("hyperspin_dir", "")
+        mmc_dir = self._config.get("mainmenuchanger_dir", "")
+        return mainmenu_utils.detect_mainmenu(hs_dir, mmc_dir)
+
+    def _mainmenu_refresh(self):
+        if not hasattr(self, "lst_mm_categories"):
+            return
+        info = self._mainmenu_get_info()
+        if not info.hs_dir or not os.path.isdir(info.hs_dir):
+            self.lbl_mainmenu_status.setText("HyperSpin no configurado.")
+            return
+
+        self.lbl_mainmenu_status.setText(info.summary())
+        self.lst_mm_categories.clear()
+        self.lst_mm_subwheels.clear()
+
+        if info.has_categories_xml:
+            _, categories = mainmenu_utils.parse_hyperspin_xml(info.categories_xml)
+            for cat in categories:
+                self.lst_mm_categories.addItem(cat.get("name", ""))
+
+        for sw in mainmenu_utils.list_subwheels(info):
+            self.lst_mm_subwheels.addItem(f"{sw.get('name','')} ({sw.get('count',0)})")
+
+    def _mainmenu_add_category(self):
+        info = self._mainmenu_get_info()
+        name, ok = QInputDialog.getText(self.parent, "Nueva categoría", "Nombre de la categoría:")
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        genre, _ = QInputDialog.getText(self.parent, "Nueva categoría", "Valor de género (opcional):")
+        if mainmenu_utils.add_category(info, name, genre.strip()):
+            self._mainmenu_refresh()
+        else:
+            QMessageBox.warning(self.parent, "Error", "No se pudo crear la categoría.")
+
+    def _mainmenu_remove_category(self):
+        current = self.lst_mm_categories.currentItem()
+        if not current:
+            return
+        name = current.text()
+        ok = QMessageBox.question(
+            self.parent, "Quitar categoría",
+            f"¿Eliminar categoría '{name}' de Categories.xml?",
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+        if ok != QMessageBox.Yes:
+            return
+        info = self._mainmenu_get_info()
+        if mainmenu_utils.remove_category(info, name):
+            self._mainmenu_refresh()
+        else:
+            QMessageBox.warning(self.parent, "Error", f"No se pudo eliminar '{name}'.")
+
+    def _mainmenu_reorder_categories(self, delta: int):
+        row = self.lst_mm_categories.currentRow()
+        if row < 0:
+            return
+        target = row + delta
+        if target < 0 or target >= self.lst_mm_categories.count():
+            return
+        item = self.lst_mm_categories.takeItem(row)
+        self.lst_mm_categories.insertItem(target, item)
+        self.lst_mm_categories.setCurrentRow(target)
+        names = [self.lst_mm_categories.item(i).text() for i in range(self.lst_mm_categories.count())]
+        info = self._mainmenu_get_info()
+        if not mainmenu_utils.reorder_categories(info, names):
+            QMessageBox.warning(self.parent, "Error", "No se pudo guardar el nuevo orden.")
+
+    def _mainmenu_convert_to_mmc(self):
+        info = self._mainmenu_get_info()
+        result = mainmenu_utils.main_menu_xml_to_all_and_categories(info, overwrite=False)
+        if result.success:
+            QMessageBox.information(self.parent, "Conversión completada", result.summary())
+            self._mainmenu_refresh()
+        else:
+            QMessageBox.warning(self.parent, "Error", result.error or "Falló la conversión.")
+
+    def _mainmenu_convert_to_classic(self):
+        info = self._mainmenu_get_info()
+        result = mainmenu_utils.all_and_categories_to_main_menu_xml(info, use_all_xml=True, overwrite=True)
+        if result.success:
+            QMessageBox.information(self.parent, "Conversión completada", result.summary())
+            self._mainmenu_refresh()
+        else:
+            QMessageBox.warning(self.parent, "Error", result.error or "Falló la conversión.")
+
+    def _mainmenu_sync_categories(self):
+        info = self._mainmenu_get_info()
+        sync = mainmenu_utils.sync_categories_with_all(info)
+        if "error" in sync:
+            QMessageBox.warning(self.parent, "Error", sync["error"])
+            return
+        created = 0
+        for genre in sync.get("genres_without_category", []):
+            if mainmenu_utils.add_category(info, genre, genre):
+                created += 1
+        msg = (
+            f"Categorías creadas: {created}\n"
+            f"Categorías huérfanas: {len(sync.get('orphan_categories', []))}"
+        )
+        QMessageBox.information(self.parent, "Sincronización", msg)
+        self._mainmenu_refresh()
+
     # ═══════════════════════════════════════════════════════════════════════════
     # INI AUDIT TAB — Auditor y clasificador de HyperSpin/Settings
     # ═══════════════════════════════════════════════════════════════════════════
@@ -3383,6 +3711,9 @@ class SystemManagerTab(TabModule):
         self.btn_ini_refresh.setStyleSheet(
             "QPushButton#btn_primary{font-weight:800;font-size:12px;letter-spacing:0.5px;}")
         self.btn_ini_refresh.clicked.connect(self._ini_on_refresh)
+        self.btn_ini_import = QPushButton("⤓ Importar RL Settings")
+        self.btn_ini_import.setFixedHeight(30)
+        self.btn_ini_import.clicked.connect(self._ini_on_import_rl)
 
         self.inp_ini_search = QLineEdit()
         self.inp_ini_search.setPlaceholderText("Buscar sistema…")
@@ -3404,6 +3735,7 @@ class SystemManagerTab(TabModule):
         self.chk_ini_hidden.toggled.connect(self._ini_populate_tree)
 
         ctrl_lay.addWidget(self.btn_ini_refresh)
+        ctrl_lay.addWidget(self.btn_ini_import)
         ctrl_lay.addWidget(self.inp_ini_search)
         ctrl_lay.addWidget(lbl_f)
         ctrl_lay.addWidget(self.cmb_ini_filter)
@@ -3558,6 +3890,7 @@ class SystemManagerTab(TabModule):
             return
 
         self.btn_ini_refresh.setEnabled(False)
+        self.btn_ini_import.setEnabled(False)
         self.btn_ini_refresh.setText("Escaneando…")
         self.ini_progress.show()
         self.ini_progress.setValue(0)
@@ -3573,6 +3906,7 @@ class SystemManagerTab(TabModule):
 
     def _ini_on_refresh_done(self, stats: dict):
         self.btn_ini_refresh.setEnabled(True)
+        self.btn_ini_import.setEnabled(True)
         self.btn_ini_refresh.setText("⟳  REFRESH SYSTEMS")
         self.ini_progress.hide()
 
@@ -3589,6 +3923,47 @@ class SystemManagerTab(TabModule):
         if self.parent:
             self.parent.statusBar().showMessage(
                 f"✓ INI Audit: {stats.get('total',0)} sistemas clasificados", 5000)
+
+    def _ini_on_import_rl(self):
+        if not self._ini_service:
+            QMessageBox.warning(self.parent, "Sin configuración", "Primero configura RocketLauncher.")
+            return
+        if not self._config.get("rocketlauncher_dir"):
+            QMessageBox.warning(self.parent, "Sin configuración",
+                                "El directorio de RocketLauncher no está configurado.")
+            return
+
+        self.btn_ini_refresh.setEnabled(False)
+        self.btn_ini_import.setEnabled(False)
+        self.btn_ini_import.setText("Importando…")
+        self.ini_progress.show()
+        self.ini_progress.setValue(0)
+        self.lbl_ini_status.setText("Escaneando RocketLauncher/Settings…")
+
+        self._import_worker = ImportWorker(self._ini_service)
+        self._import_worker.progress.connect(
+            lambda pct, name: (self.ini_progress.setValue(pct),
+                               self.lbl_ini_status.setText(f"Importando: {name}")))
+        self._import_worker.finished.connect(self._ini_on_import_done)
+        self._import_worker.start()
+
+    def _ini_on_import_done(self, stats: dict):
+        self.btn_ini_refresh.setEnabled(True)
+        self.btn_ini_import.setEnabled(True)
+        self.btn_ini_import.setText("⤓ Importar RL Settings")
+        self.ini_progress.hide()
+        if "error" in stats:
+            self.lbl_ini_status.setText(f"✗ {stats['error']}")
+            return
+        self._ini_update_chips(stats)
+        self._ini_populate_tree()
+        self.lbl_ini_status.setText(
+            f"Importados {stats.get('imported', 0)} · "
+            f"omitidos {stats.get('skipped', 0)} · "
+            f"total {stats.get('total', 0)}")
+        if self.parent:
+            self.parent.statusBar().showMessage(
+                f"Importación RL: {stats.get('imported', 0)} nuevos sistemas.", 6000)
 
     def _ini_update_chips(self, stats: dict):
         by_type = stats.get("by_type", {})
