@@ -15,7 +15,7 @@ from collections import Counter
 
 import xml.etree.ElementTree as ET
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QLabel, QPushButton, QLineEdit, QComboBox,
     QTreeWidget, QTreeWidgetItem, QTableWidget, QTableWidgetItem,
@@ -25,8 +25,8 @@ from PyQt5.QtWidgets import (
     QGridLayout, QProgressBar, QFormLayout, QMenu, QInputDialog,
     QListWidget
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt5.QtGui import QColor, QFont, QBrush
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QColor, QFont, QBrush
 from utils import mainmenu_utils
 
 try:
@@ -784,7 +784,7 @@ class DeleteSystemDialog(QDialog):
         lay.setSpacing(10)
 
         hdr = QLabel(f"¿Cómo quieres eliminar <b>{self.rec.name}</b>?")
-        hdr.setTextFormat(Qt.RichText)
+        hdr.setTextFormat(Qt.TextFormat.RichText)
         hdr.setStyleSheet("font-size:13px; color:#c8cdd8; padding:4px;")
         lay.addWidget(hdr)
 
@@ -869,8 +869,8 @@ class DeleteSystemDialog(QDialog):
                 self, "Confirmar borrado real",
                 f"¿Seguro que quieres borrar archivos de disco?\n\n"
                 f"Sistema: {self.rec.name}\n\nEsta acción NO se puede deshacer.",
-                QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
-            if ok != QMessageBox.Yes:
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel)
+            if ok != QMessageBox.StandardButton.Yes:
                 return
         self.options = {
             "delete_ini":    self.chk_ini.isChecked(),
@@ -1483,11 +1483,11 @@ class DiffReportDialog(QDialog):
             f"&nbsp;&nbsp;|&nbsp;&nbsp;  "
             f"<b>Solo en RocketLauncher</b> ({len(self.only_rl)} juegos — no aparecerán)"
         )
-        header.setTextFormat(Qt.RichText)
+        header.setTextFormat(Qt.TextFormat.RichText)
         header.setStyleSheet("color: #8892a4; font-size: 12px; padding: 4px;")
         lay.addWidget(header)
 
-        splitter = QSplitter(Qt.Horizontal)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # Panel HS
         hs_w = QWidget()
@@ -1590,7 +1590,7 @@ class RemoveGameDialog(QDialog):
         n = len(self.game_names)
         hdr = QLabel(
             f"<b>Eliminar {n} juego(s)</b> del sistema <b>{self.sys_name}</b>")
-        hdr.setTextFormat(Qt.RichText)
+        hdr.setTextFormat(Qt.TextFormat.RichText)
         hdr.setStyleSheet("font-size:13px;color:#c8cdd8;padding:4px;")
         lay.addWidget(hdr)
 
@@ -1713,7 +1713,7 @@ class SystemManagerTab(TabModule):
         self._games_cols: list[str] = []
         self._games_dirty: bool = False
         self._games_sort_col: int = 1
-        self._games_sort_order = Qt.AscendingOrder
+        self._games_sort_order = Qt.SortOrder.AscendingOrder
         # INI de módulo por juego
         self._module_ini_path: str = ""
         self._module_type: str = ""
@@ -1756,7 +1756,7 @@ class SystemManagerTab(TabModule):
         root_lay.addWidget(top)
 
         # ── Splitter principal ───────────────────────────────────────────────
-        splitter = QSplitter(Qt.Horizontal)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(1)
         splitter.setStyleSheet("QSplitter::handle { background: #1e2330; }")
 
@@ -1854,7 +1854,7 @@ class SystemManagerTab(TabModule):
             }
         """)
         self.system_list.currentItemChanged.connect(self._on_system_selected)
-        self.system_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.system_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.system_list.customContextMenuRequested.connect(self._on_system_list_context_menu)
 
         lay.addWidget(hdr)
@@ -1867,13 +1867,13 @@ class SystemManagerTab(TabModule):
             return
         menu = QMenu(self.system_list)
         menu.addAction("Eliminar sistema…").triggered.connect(self._delete_selected_system_from_main_list)
-        menu.exec_(self.system_list.viewport().mapToGlobal(pos))
+        menu.exec(self.system_list.viewport().mapToGlobal(pos))
 
     def _delete_selected_system_from_main_list(self):
         item = self.system_list.currentItem()
         if not item:
             return
-        sys_data = item.data(0, Qt.UserRole) or {}
+        sys_data = item.data(0, Qt.ItemDataRole.UserRole) or {}
         name = sys_data.get("name", "").strip()
         if not name:
             return
@@ -1889,7 +1889,7 @@ class SystemManagerTab(TabModule):
             return
 
         dlg = DeleteSystemDialog(rec, parent=self.parent)
-        if dlg.exec_() != QDialog.Accepted:
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
         if dlg.mode == DeleteSystemDialog.MODE_HIDE:
@@ -1932,9 +1932,9 @@ class SystemManagerTab(TabModule):
 
         self.folders_tree = QTreeWidget()
         self.folders_tree.setHeaderLabels(["Carpeta / Archivo", "Archivos", "Estado"])
-        self.folders_tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.folders_tree.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.folders_tree.header().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.folders_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.folders_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.folders_tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.folders_tree.setAlternatingRowColors(False)
         self.folders_tree.setStyleSheet("""
             QTreeWidget {
@@ -1998,9 +1998,9 @@ class SystemManagerTab(TabModule):
         # Tabla resumen
         self.diff_table = QTableWidget(0, 3)
         self.diff_table.setHorizontalHeaderLabels(["Juego", "HyperSpin", "RocketLauncher"])
-        self.diff_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.diff_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.diff_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.diff_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.diff_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.diff_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.diff_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.diff_table.setStyleSheet(
             "QTableWidget { background: #0a0d12; border: 1px solid #1e2330; border-radius: 6px; }")
@@ -2074,10 +2074,10 @@ class SystemManagerTab(TabModule):
         COLS = ["Nombre", "Descripción", "Wheel", "Theme", "Video", "Bezel", "Activo"]
         self.audit_table = QTableWidget(0, len(COLS))
         self.audit_table.setHorizontalHeaderLabels(COLS)
-        self.audit_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.audit_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.audit_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.audit_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         for i in range(2, len(COLS)):
-            self.audit_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeToContents)
+            self.audit_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
         self.audit_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.audit_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.audit_table.setAlternatingRowColors(False)
@@ -2150,10 +2150,10 @@ class SystemManagerTab(TabModule):
         GCOLS_LABEL = ["ROM Name", "Descripción", "Año", "Fabricante", "Género", "Rating", "Activo"]
         self.games_table = QTableWidget(0, len(GCOLS))
         self.games_table.setHorizontalHeaderLabels(GCOLS_LABEL)
-        self.games_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.games_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.games_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.games_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         for i in range(2, len(GCOLS)):
-            self.games_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeToContents)
+            self.games_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
         self.games_table.setSortingEnabled(True)
         self.games_table.setEditTriggers(QAbstractItemView.DoubleClicked)
         self.games_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -2165,7 +2165,7 @@ class SystemManagerTab(TabModule):
 
         lay.addLayout(top_row)
         lay.addLayout(search_row)
-        body = QSplitter(Qt.Horizontal)
+        body = QSplitter(Qt.Orientation.Horizontal)
         body.setChildrenCollapsible(False)
         body.addWidget(self.games_table)
         body.addWidget(self._build_module_ini_editor())
@@ -2187,7 +2187,7 @@ class SystemManagerTab(TabModule):
         lay.addWidget(self.lbl_module_info)
 
         self.module_form = QFormLayout()
-        self.module_form.setLabelAlignment(Qt.AlignRight)
+        self.module_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         lay.addLayout(self.module_form)
 
         self._module_field_rows: dict[str, tuple[QLabel, QLineEdit]] = {}
@@ -2273,7 +2273,7 @@ class SystemManagerTab(TabModule):
             if search_filter and search_filter not in name.lower():
                 continue
             item = QTreeWidgetItem([name])
-            item.setData(0, Qt.UserRole, sys)
+            item.setData(0, Qt.ItemDataRole.UserRole, sys)
             if sys.get("enabled", "1") != "1":
                 item.setForeground(0, QBrush(C_DIM))
             self.system_list.addTopLevelItem(item)
@@ -2309,7 +2309,7 @@ class SystemManagerTab(TabModule):
             self.system_list.setCurrentItem(previous)
             self.system_list.blockSignals(False)
             return
-        sys_data = current.data(0, Qt.UserRole)
+        sys_data = current.data(0, Qt.ItemDataRole.UserRole)
         if not sys_data:
             return
         self._current_system = sys_data.get("name", "")
@@ -2380,7 +2380,7 @@ class SystemManagerTab(TabModule):
             g = QTreeWidgetItem(self.folders_tree)
             g.setText(0, label)
             g.setForeground(0, QBrush(QColor(color)))
-            g.setFlags(g.flags() & ~Qt.ItemIsSelectable)
+            g.setFlags(g.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             f = g.font(0); f.setBold(True); g.setFont(0, f)
             return g
 
@@ -2654,8 +2654,8 @@ class SystemManagerTab(TabModule):
                     item.setBackground(QBrush(C_ERR))
                     self.diff_table.setItem(row, c, item)
 
-            hs_cell.setTextAlignment(Qt.AlignCenter)
-            rl_cell.setTextAlignment(Qt.AlignCenter)
+            hs_cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            rl_cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.diff_table.setItem(row, 1, hs_cell)
             self.diff_table.setItem(row, 2, rl_cell)
 
@@ -2708,7 +2708,7 @@ class SystemManagerTab(TabModule):
 
     def _show_diff_report(self):
         dlg = DiffReportDialog(self._diff_only_hs, self._diff_only_rl, parent=self.parent)
-        dlg.exec_()
+        dlg.exec()
 
     # ── Auditoría de media ─────────────────────────────────────────────────────
 
@@ -2775,10 +2775,10 @@ class SystemManagerTab(TabModule):
         self.audit_table.setColumnCount(len(COLS))
         self.audit_table.setHorizontalHeaderLabels(COLS)
         hdr = self.audit_table.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        hdr.setSectionResizeMode(1, QHeaderView.Stretch)
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         for i in range(2, len(COLS)):
-            hdr.setSectionResizeMode(i, QHeaderView.ResizeToContents)
+            hdr.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
 
         self.audit_table.setRowCount(len(rows))
 
@@ -2801,7 +2801,7 @@ class SystemManagerTab(TabModule):
                         cell = QTableWidgetItem("⚠" if val else "✓")
                     else:
                         cell = QTableWidgetItem("✓" if val else "✗")
-                    cell.setTextAlignment(Qt.AlignCenter)
+                    cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     if val and key != "wheel_naming_issue":
                         cell.setForeground(QBrush(C_OK_FG))
                         counts[key] += 1
@@ -2890,16 +2890,16 @@ class SystemManagerTab(TabModule):
         if not self._games_dirty and not self._module_ini_dirty:
             return True
         msg = QMessageBox(self.parent)
-        msg.setIcon(QMessageBox.Warning)
+        msg.setIcon(QMessageBox.Icon.Warning)
         msg.setWindowTitle("Cambios sin guardar")
         msg.setText("Hay cambios pendientes.")
         msg.setInformativeText("¿Quieres guardarlos antes de continuar?")
-        msg.setStandardButtons(QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
-        msg.setDefaultButton(QMessageBox.Save)
-        res = msg.exec_()
-        if res == QMessageBox.Cancel:
+        msg.setStandardButtons(QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
+        msg.setDefaultButton(QMessageBox.StandardButton.Save)
+        res = msg.exec()
+        if res == QMessageBox.StandardButton.Cancel:
             return False
-        if res == QMessageBox.Save:
+        if res == QMessageBox.StandardButton.Save:
             if self._module_ini_dirty:
                 self._save_module_ini_for_selected_game()
                 if self._module_ini_dirty:
@@ -3145,7 +3145,7 @@ class SystemManagerTab(TabModule):
         btns.rejected.connect(dlg.reject)
         lay.addWidget(btns, len(fields), 0, 1, 2)
 
-        if dlg.exec_() == QDialog.Accepted:
+        if dlg.exec() == QDialog.DialogCode.Accepted:
             new_game = {k: fields[k].text().strip() for k in fields}
             if not new_game["name"]:
                 return
@@ -3188,7 +3188,7 @@ class SystemManagerTab(TabModule):
             config=self._config,
             parent=self.parent,
         )
-        if dlg.exec_() != QDialog.Accepted:
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
         scope = dlg.scope   # "hs_only" | "hs_and_rl"
@@ -3293,10 +3293,10 @@ class SystemManagerTab(TabModule):
             self.parent, "Fusionar o reemplazar",
             f"Se encontraron {len(new_games)} ROMs.\n"
             "¿Fusionar con la lista actual? (No = reemplazar)",
-            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
-        if merge == QMessageBox.Cancel:
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel)
+        if merge == QMessageBox.StandardButton.Cancel:
             return
-        if merge == QMessageBox.No:
+        if merge == QMessageBox.StandardButton.No:
             self._games_data = new_games
         else:
             existing_names = {g["name"] for g in self._games_data}
@@ -3339,7 +3339,7 @@ class SystemManagerTab(TabModule):
             btn_row.addWidget(b)
         btn_row.addStretch()
 
-        split = QSplitter(Qt.Horizontal)
+        split = QSplitter(Qt.Orientation.Horizontal)
         split.setHandleWidth(1)
         split.setStyleSheet("QSplitter::handle{background:#1e2330;}")
 
@@ -3422,8 +3422,8 @@ class SystemManagerTab(TabModule):
         ok = QMessageBox.question(
             self.parent, "Quitar categoría",
             f"¿Eliminar categoría '{name}' de Categories.xml?",
-            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
-        if ok != QMessageBox.Yes:
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel)
+        if ok != QMessageBox.StandardButton.Yes:
             return
         info = self._mainmenu_get_info()
         if mainmenu_utils.remove_category(info, name):
@@ -3588,7 +3588,7 @@ class SystemManagerTab(TabModule):
             "stop:0 #0d4f7a,stop:1 #4fc3f7);}")
 
         # ── Splitter: árbol + detalle ────────────────────────────────────────
-        splitter = QSplitter(Qt.Horizontal)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(1)
         splitter.setStyleSheet("QSplitter::handle{background:#1e2330;}")
 
@@ -3599,19 +3599,19 @@ class SystemManagerTab(TabModule):
             "👁", "Sistema", "Tipo", "EXE", "Audit", "HL", "Filtro / Parámetros"
         ])
         hdr = self.ini_tree.header()
-        hdr.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        hdr.setSectionResizeMode(1, QHeaderView.Interactive)
-        hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        hdr.setSectionResizeMode(3, QHeaderView.Interactive)
-        hdr.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        hdr.setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        hdr.setSectionResizeMode(6, QHeaderView.Stretch)
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
+        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         self.ini_tree.setColumnWidth(1, 200)
         self.ini_tree.setColumnWidth(3, 160)
         self.ini_tree.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.ini_tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.ini_tree.itemClicked.connect(self._ini_on_item_clicked)
-        self.ini_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.ini_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.ini_tree.customContextMenuRequested.connect(self._ini_context_menu)
         self.ini_tree.setStyleSheet("""
             QTreeWidget{background:#0a0d12;border:none;outline:none;font-size:12px;}
@@ -3827,7 +3827,7 @@ class SystemManagerTab(TabModule):
             grp.setForeground(1, QBrush(QColor(fg)))
             for col in range(7):
                 grp.setBackground(col, QBrush(QColor(bg)))
-            grp.setFlags(grp.flags() & ~Qt.ItemIsSelectable)
+            grp.setFlags(grp.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             f = grp.font(1)
             f.setBold(True)
             grp.setFont(1, f)
@@ -3839,7 +3839,7 @@ class SystemManagerTab(TabModule):
     def _ini_add_item(self, parent: QTreeWidgetItem, rec: "SystemIniRecord"):
         d, a = rec.ini_data, rec.audit
         item = QTreeWidgetItem(parent)
-        item.setData(0, Qt.UserRole, rec.name)
+        item.setData(0, Qt.ItemDataRole.UserRole, rec.name)
 
         # 👁 visibilidad
         item.setText(0, "👁" if not rec.hidden_in_app else "○")
@@ -3866,12 +3866,12 @@ class SystemManagerTab(TabModule):
         status = a.status
         item.setText(4, icons.get(status, "?"))
         item.setForeground(4, QBrush(QColor(colors.get(status, "#8892a4"))))
-        item.setTextAlignment(4, Qt.AlignCenter)
+        item.setTextAlignment(4, Qt.AlignmentFlag.AlignCenter)
 
         # HyperLaunch
         item.setText(5, "HL" if d.hyperlaunch else "—")
         item.setForeground(5, QBrush(QColor("#69f0ae" if d.hyperlaunch else "#3a4560")))
-        item.setTextAlignment(5, Qt.AlignCenter)
+        item.setTextAlignment(5, Qt.AlignmentFlag.AlignCenter)
 
         # Filtro / parámetros
         if rec.type == INI_TYPE_MMC:
@@ -3900,7 +3900,7 @@ class SystemManagerTab(TabModule):
     # ── Selección y detalle ───────────────────────────────────────────────────
 
     def _ini_on_item_clicked(self, item: QTreeWidgetItem, col: int):
-        name = item.data(0, Qt.UserRole)
+        name = item.data(0, Qt.ItemDataRole.UserRole)
         if not name or not self._ini_service:
             return
         rec = self._ini_service.records.get(name)
@@ -4040,7 +4040,7 @@ class SystemManagerTab(TabModule):
         items = self.ini_tree.selectedItems()
         if not items:
             return None
-        return items[0].data(0, Qt.UserRole)
+        return items[0].data(0, Qt.ItemDataRole.UserRole)
 
     # ── Acciones ──────────────────────────────────────────────────────────────
 
@@ -4072,7 +4072,7 @@ class SystemManagerTab(TabModule):
         if not rec:
             return
         dlg = DeleteSystemDialog(rec, parent=self.parent)
-        if dlg.exec_() != QDialog.Accepted:
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         if dlg.mode == DeleteSystemDialog.MODE_HIDE:
             self._ini_service.hide_in_app(name)
@@ -4102,11 +4102,11 @@ class SystemManagerTab(TabModule):
                 f"Re-auditado '{name}' → {rec.audit.status if rec else '?'}", 4000)
 
     def _ini_context_menu(self, pos):
-        from PyQt5.QtWidgets import QMenu
+        from PyQt6.QtWidgets import QMenu
         item = self.ini_tree.itemAt(pos)
         if not item:
             return
-        name = item.data(0, Qt.UserRole)
+        name = item.data(0, Qt.ItemDataRole.UserRole)
         if not name or not self._ini_service:
             return
         rec = self._ini_service.records.get(name)
@@ -4129,4 +4129,4 @@ class SystemManagerTab(TabModule):
             menu.addAction("Ocultar en app").triggered.connect(self._ini_on_hide)
         menu.addSeparator()
         menu.addAction("Eliminar…").triggered.connect(self._ini_on_delete)
-        menu.exec_(self.ini_tree.viewport().mapToGlobal(pos))
+        menu.exec(self.ini_tree.viewport().mapToGlobal(pos))

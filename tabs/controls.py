@@ -16,7 +16,7 @@ import configparser
 from pathlib import Path
 from typing import Optional
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QComboBox, QLineEdit,
     QGroupBox, QScrollArea, QFrame, QSplitter,
@@ -25,11 +25,11 @@ from PyQt5.QtWidgets import (
     QSizePolicy, QAbstractItemView, QDialog,
     QDialogButtonBox, QCheckBox, QTextEdit
 )
-from PyQt5.QtCore import (
+from PyQt6.QtCore import (
     Qt, QMimeData, QPoint, QRect, QSize,
     pyqtSignal, QTimer
 )
-from PyQt5.QtGui import (
+from PyQt6.QtGui import (
     QColor, QPainter, QPen, QBrush, QFont,
     QFontMetrics, QDrag, QPainterPath, QPixmap,
     QLinearGradient, QRadialGradient, QPalette,
@@ -115,7 +115,7 @@ class ButtonSlot(QWidget):
         self.setFixedSize(fixed, fixed)
         self.setAcceptDrops(True)
         self.setMouseTracking(True)
-        self.setCursor(Qt.PointingHandCursor)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def set_actions(self, actions: list):
         self._actions = actions
@@ -134,7 +134,7 @@ class ButtonSlot(QWidget):
         base = QColor(color_str).lighter(130) if self._hover else QColor(color_str)
 
         # Sombra
-        p.setPen(Qt.NoPen)
+        p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(QColor(0, 0, 0, 80)))
         if self.shape == self.CIRCLE:
             p.drawEllipse(cx - r + 2, cy - r + 2, r * 2, r * 2)
@@ -157,18 +157,18 @@ class ButtonSlot(QWidget):
         if self.label:
             p.setFont(QFont("Segoe UI", 7, QFont.Bold))
             p.setPen(QPen(QColor("#3a4560")))
-            p.drawText(QRect(0, 0, w, h), Qt.AlignTop | Qt.AlignHCenter, self.label)
+            p.drawText(QRect(0, 0, w, h), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter, self.label)
 
         # Acción asignada
         if self.action and self.action != "---":
             p.setFont(QFont("Segoe UI", 7, QFont.Bold))
             p.setPen(QPen(QColor("#e8ecf4")))
             rect = QRect(cx - r + 2, cy - 10, r * 2 - 4, 20)
-            p.drawText(rect, Qt.AlignCenter | Qt.TextWordWrap, self.action[:12])
+            p.drawText(rect, Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, self.action[:12])
         else:
             p.setFont(QFont("Segoe UI", 7))
             p.setPen(QPen(QColor("#2a3a55")))
-            p.drawText(QRect(cx - r, cy - 8, r * 2, 16), Qt.AlignCenter, "—")
+            p.drawText(QRect(cx - r, cy - 8, r * 2, 16), Qt.AlignmentFlag.AlignCenter, "—")
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasText():
@@ -197,7 +197,7 @@ class ButtonSlot(QWidget):
         self.update()
 
     def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             action, ok = QInputDialog.getItem(
                 self, f"Asignar — {self.slot_id}", "Acción:",
                 [a for a in self._actions], 0, False)
@@ -217,7 +217,7 @@ class DraggableActionItem(QWidget):
         super().__init__(parent)
         self.action = action
         self.setFixedHeight(28)
-        self.setCursor(Qt.OpenHandCursor)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(6, 2, 6, 2)
         dot = QLabel()
@@ -230,7 +230,7 @@ class DraggableActionItem(QWidget):
         lay.addStretch()
 
     def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.LeftButton:
+        if event.buttons() & Qt.MouseButton.LeftButton:
             drag = QDrag(self)
             mime = QMimeData()
             mime.setText(self.action)
@@ -240,15 +240,15 @@ class DraggableActionItem(QWidget):
             painter = QPainter(pix)
             painter.setRenderHint(QPainter.Antialiasing)
             painter.setBrush(QBrush(QColor(action_color(self.action))))
-            painter.setPen(Qt.NoPen)
+            painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRoundedRect(0, 0, 160, 28, 4, 4)
             painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
             painter.setPen(QPen(QColor("#ffffff")))
-            painter.drawText(QRect(0, 0, 160, 28), Qt.AlignCenter, self.action)
+            painter.drawText(QRect(0, 0, 160, 28), Qt.AlignmentFlag.AlignCenter, self.action)
             painter.end()
             drag.setPixmap(pix)
             drag.setHotSpot(event.pos())
-            drag.exec_(Qt.CopyAction)
+            drag.exec(Qt.DropAction.CopyAction)
 
 
 # ─── ActionPalette ────────────────────────────────────────────────────────────
@@ -285,7 +285,7 @@ class ActionPalette(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet("background:#0a0d12;")
 
         content = QWidget()
@@ -327,13 +327,13 @@ class StickCanvas(QWidget):
         p.drawPolygon(QPolygon(pts))
 
         # Base del stick
-        p.setPen(Qt.NoPen)
+        p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(QColor("#222222")))
         p.drawEllipse(cx - r, cy - r, r * 2, r * 2)
 
         # Anillo de acento
         p.setPen(QPen(self.accent, 2.5))
-        p.setBrush(Qt.NoBrush)
+        p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawEllipse(cx - r, cy - r, r * 2, r * 2)
 
         # Bola
@@ -378,7 +378,7 @@ class ArcadeLayout(QWidget):
         p2_lbl.setStyleSheet(
             "color:#4fc3f7;font-size:11px;font-weight:800;"
             "letter-spacing:1.5px;font-family:'Consolas',monospace;")
-        p2_lbl.setAlignment(Qt.AlignRight)
+        p2_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
         top_row.addWidget(p1_lbl)
         top_row.addStretch()
         top_row.addWidget(p2_lbl)
@@ -409,9 +409,9 @@ class ArcadeLayout(QWidget):
         js_lay.setSpacing(2)
         stick = StickCanvas(accent)
         dirs_lbl = QLabel("↑ ↓ ← →")
-        dirs_lbl.setAlignment(Qt.AlignCenter)
+        dirs_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dirs_lbl.setStyleSheet(f"color:{accent};font-size:10px;font-weight:700;")
-        js_lay.addWidget(stick, 0, Qt.AlignHCenter)
+        js_lay.addWidget(stick, 0, Qt.AlignmentFlag.AlignHCenter)
         js_lay.addWidget(dirs_lbl)
 
         # Botones 3+3+2 (layout Sega/Capcom)
@@ -430,7 +430,7 @@ class ArcadeLayout(QWidget):
             btn = ButtonSlot(slot_id, f"B{num}", ButtonSlot.CIRCLE, 42)
             btn.set_actions(ARCADE_ACTIONS)
             btn.assignment_changed.connect(self._on_slot)
-            btn_lay.addWidget(btn, row, col, Qt.AlignCenter)
+            btn_lay.addWidget(btn, row, col, Qt.AlignmentFlag.AlignCenter)
             self._slots[slot_id] = btn
 
         lay.addWidget(js_w)
@@ -530,7 +530,7 @@ class GamepadBody(QWidget):
             (170, 92,  "#1565c0"),
         ]
         for fx, fy, fc in face:
-            p.setPen(Qt.NoPen)
+            p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QBrush(QColor(fc)))
             p.drawEllipse(fx-7, fy-7, 14, 14)
 
@@ -615,7 +615,7 @@ class GamepadLayout(QWidget):
             btn.set_actions(GAMEPAD_ACTIONS)
             btn.assignment_changed.connect(self._on_slot)
             self._slots[sid] = btn
-            lay.addWidget(btn, row, col, Qt.AlignCenter)
+            lay.addWidget(btn, row, col, Qt.AlignmentFlag.AlignCenter)
 
         center = QWidget()
         center.setFixedSize(28, 28)
@@ -623,7 +623,7 @@ class GamepadLayout(QWidget):
         lay.addWidget(center, 1, 1)
 
         lbl = QLabel("D-PAD")
-        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setStyleSheet("color:#2a3a55;font-size:9px;font-weight:700;")
         outer_l.addWidget(w)
         outer_l.addWidget(lbl)
@@ -651,10 +651,10 @@ class GamepadLayout(QWidget):
             btn.set_actions(GAMEPAD_ACTIONS)
             btn.assignment_changed.connect(self._on_slot)
             self._slots[sid] = btn
-            lay.addWidget(btn, row, col, Qt.AlignCenter)
+            lay.addWidget(btn, row, col, Qt.AlignmentFlag.AlignCenter)
 
         lbl = QLabel("BOTONES")
-        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setStyleSheet("color:#2a3a55;font-size:9px;font-weight:700;")
         outer_l.addWidget(w)
         outer_l.addWidget(lbl)
@@ -670,9 +670,9 @@ class GamepadLayout(QWidget):
         btn.assignment_changed.connect(self._on_slot)
         self._slots[slot_id] = btn
         lbl = QLabel(f"{label} click")
-        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setStyleSheet("color:#2a3a55;font-size:9px;")
-        lay.addWidget(btn, 0, Qt.AlignHCenter)
+        lay.addWidget(btn, 0, Qt.AlignmentFlag.AlignHCenter)
         lay.addWidget(lbl)
         return w
 
@@ -702,15 +702,15 @@ class GamepadLayout(QWidget):
 
     def _build_center(self) -> QVBoxLayout:
         lay = QVBoxLayout()
-        lay.setAlignment(Qt.AlignCenter)
+        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.setSpacing(8)
 
         body = GamepadBody()
-        lay.addWidget(body, 0, Qt.AlignHCenter)
+        lay.addWidget(body, 0, Qt.AlignmentFlag.AlignHCenter)
 
         spec_row = QHBoxLayout()
         spec_row.setSpacing(10)
-        spec_row.setAlignment(Qt.AlignCenter)
+        spec_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
         for sid, label in [("btn_select", "SELECT"), ("btn_start", "START")]:
             btn = ButtonSlot(sid, label, ButtonSlot.RECT, 26)
             btn.set_actions(GAMEPAD_ACTIONS)
@@ -720,7 +720,7 @@ class GamepadLayout(QWidget):
         lay.addLayout(spec_row)
 
         credit_lbl = QLabel("HyperSpin Manager · Gamepad Editor")
-        credit_lbl.setAlignment(Qt.AlignCenter)
+        credit_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         credit_lbl.setStyleSheet("color:#1e2d45;font-size:9px;")
         lay.addWidget(credit_lbl)
         lay.addStretch()
@@ -780,7 +780,7 @@ class ControlsTab(TabModule):
         root_lay.setSpacing(0)
         root_lay.addWidget(self._build_toolbar())
 
-        splitter = QSplitter(Qt.Horizontal)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(1)
         splitter.setStyleSheet("QSplitter::handle{background:#1e2330;}")
 
@@ -863,7 +863,7 @@ class ControlsTab(TabModule):
         content = QWidget()
         content.setStyleSheet("background:#0d0f14;")
         c_lay = QVBoxLayout(content)
-        c_lay.setAlignment(Qt.AlignCenter)
+        c_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         c_lay.setContentsMargins(0, 0, 0, 0)
 
         self.arcade_layout  = ArcadeLayout()
@@ -1108,8 +1108,8 @@ class ControlsTab(TabModule):
                     ok = QMessageBox.question(
                         self.parent, "JoyToKey existente",
                         f"Ya existe:\n{cfg_path}\n\n¿Sobrescribir con la plantilla del sistema?",
-                        QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
-                    if ok != QMessageBox.Yes:
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel)
+                    if ok != QMessageBox.StandardButton.Yes:
                         return
             except Exception:
                 return
@@ -1133,8 +1133,8 @@ class ControlsTab(TabModule):
             return
         reply = QMessageBox.question(
             self.parent, "Eliminar perfil", f"¿Eliminar '{name}'?",
-            QMessageBox.Yes | QMessageBox.Cancel)
-        if reply == QMessageBox.Yes:
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        if reply == QMessageBox.StandardButton.Yes:
             self.cmb_profile.removeItem(self.cmb_profile.currentIndex())
             self._profiles.pop(name, None)
             prof_dir = self._get_profile_dir()
@@ -1191,8 +1191,8 @@ class ControlsTab(TabModule):
     def _clear_layout(self):
         reply = QMessageBox.question(
             self.parent, "Limpiar", "¿Eliminar todas las asignaciones?",
-            QMessageBox.Yes | QMessageBox.Cancel)
-        if reply == QMessageBox.Yes:
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        if reply == QMessageBox.StandardButton.Yes:
             layout = self.arcade_layout if self._current_mode == "arcade" else self.gamepad_layout
             layout.clear_all()
             self._update_summary()

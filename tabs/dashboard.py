@@ -4,11 +4,11 @@ DashboardTab — Ejemplo de módulo de pestaña (plugin demo)
 Muestra un resumen del estado del sistema.
 """
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QSizePolicy, QTextEdit
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 from core.dashboard_stats import collect_dashboard_stats
 
@@ -42,7 +42,7 @@ def _stat_card(value: str, label: str, color: str = "#4fc3f7") -> QFrame:
 
     val_lbl = QLabel(value)
     val_lbl.setStyleSheet(f"font-size: 26px; font-weight: 800; color: {color};")
-    val_lbl.setAlignment(Qt.AlignLeft)
+    val_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
     lbl_lbl = QLabel(label)
     lbl_lbl.setStyleSheet("font-size: 11px; color: #3a4a68; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;")
