@@ -77,6 +77,7 @@ ROM_EXTENSIONS = {
     ".gbc", ".n64", ".z64", ".v64", ".nds", ".3ds", ".cia",
     ".cso", ".pbp", ".elf", ".xex", ".gcm", ".rvz", ".wad",
 }
+WINDOWS_INVALID_NAME_CHARS = set('<>:"/\\|?*')
 
 # =============================================================================
 # PLANTILLAS DE ARCHIVOS INI (basadas en archivos reales)
@@ -1811,6 +1812,12 @@ class CreateSystemTab(TabModule):
         if not name:
             self.lbl_name_status.setText("")
             return
+        invalid = sorted({ch for ch in name if ch in WINDOWS_INVALID_NAME_CHARS})
+        if invalid:
+            chars = " ".join(invalid)
+            self.lbl_name_status.setText(f"✗ Nombre inválido. No se permiten: {chars}")
+            self.lbl_name_status.setStyleSheet("color:#ef9a9a;font-size:11px;")
+            return
         existing = os.path.join(hs_dir, "Databases", name) if hs_dir else ""
         if existing and os.path.isdir(existing):
             self.lbl_name_status.setText("⚠ Ya existe (se actualizará si marcas 'Sobreescribir')")
@@ -1931,6 +1938,16 @@ class CreateSystemTab(TabModule):
         if not name:
             QMessageBox.warning(self.parent, "Nombre requerido",
                                 "El nombre del sistema no puede estar vacío.")
+            return
+        invalid = sorted({ch for ch in name if ch in WINDOWS_INVALID_NAME_CHARS})
+        if invalid:
+            QMessageBox.warning(
+                self.parent,
+                "Nombre inválido",
+                "El nombre del sistema contiene caracteres no válidos para Windows:\n"
+                f"{' '.join(invalid)}\n\n"
+                "No se creó ningún archivo.",
+            )
             return
         if not hs_dir or not os.path.isdir(hs_dir):
             QMessageBox.critical(self.parent, "Configuración incompleta",

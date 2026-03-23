@@ -3,5 +3,12 @@
   "hyperspin_exe": "",
   "rocketlauncher_dir": "",
   "rocketlauncherui_dir": "",
-  "rocketlauncherui_exe": ""
+  "rocketlauncherui_exe": "",
+  "rocketlauncherui_ini": "",
+  "window_width": 1280,
+  "window_height": 800,
+  "window_x": null,
+  "window_y": null,
+  "active_tab": 0,
+  "last_selected_system": ""
 }

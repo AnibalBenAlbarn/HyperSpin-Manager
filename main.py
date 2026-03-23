@@ -53,6 +53,13 @@ CONFIG_REQUIRED_KEYS = [
     "rocketlauncherui_dir",
     "hyperspin_exe",
 ]
+DEFAULT_UI_STATE = {
+    "window_width": 1280,
+    "window_height": 800,
+    "window_x": None,
+    "window_y": None,
+    "active_tab": 0,
+}
 
 # ─── QSS Global (tema oscuro) ──────────────────────────────────────────────────
 BASE_QSS = """
@@ -515,6 +522,7 @@ class MainWindow(QMainWindow):
 
         # Añadir accesos rápidos en menú Vista → Ir a pestaña
         self._populate_goto_menu()
+        self._restore_ui_state()
 
         if config_ok or wizard_done:
             self.statusBar().showMessage(
@@ -639,6 +647,7 @@ class MainWindow(QMainWindow):
     # ── Acciones de menú ──────────────────────────────────────────────────────
 
     def _on_save(self):
+        self._capture_ui_state()
         for module in self.modules:
             try:
                 partial = module.save_data()
@@ -733,6 +742,32 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self._on_save()
         event.accept()
+
+    # ── Estado de UI persistente ─────────────────────────────────────────────
+
+    def _capture_ui_state(self):
+        self.config["window_width"] = max(self.width(), 800)
+        self.config["window_height"] = max(self.height(), 600)
+        self.config["window_x"] = self.x()
+        self.config["window_y"] = self.y()
+        self.config["active_tab"] = self.tab_widget.currentIndex()
+
+    def _restore_ui_state(self):
+        state = dict(DEFAULT_UI_STATE)
+        state.update({k: self.config.get(k) for k in DEFAULT_UI_STATE.keys() if k in self.config})
+
+        width = int(state.get("window_width") or DEFAULT_UI_STATE["window_width"])
+        height = int(state.get("window_height") or DEFAULT_UI_STATE["window_height"])
+        self.resize(max(width, 1100), max(height, 720))
+
+        pos_x = state.get("window_x")
+        pos_y = state.get("window_y")
+        if isinstance(pos_x, int) and isinstance(pos_y, int):
+            self.move(pos_x, pos_y)
+
+        active_tab = state.get("active_tab", 0)
+        if isinstance(active_tab, int) and 0 <= active_tab < self.tab_widget.count():
+            self.tab_widget.setCurrentIndex(active_tab)
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ ConfigurationTab — Asistente de configuración inicial y pestaña de ajustes
 import os
 import json
 import shutil
+import configparser
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -68,6 +69,93 @@ def _validate_file(path: str, filename: str = "") -> tuple[bool, str]:
     if filename and not path.lower().endswith(filename.lower()):
         return False, f"Se esperaba un archivo '{filename}'."
     return True, "OK"
+
+
+def _read_rl_folder_from_rlui_ini(ini_path: str) -> str:
+    """
+    Lee RL_Folder desde RocketLauncherUI.ini.
+    Soporta INI con sección [Settings] y también formato key=value plano.
+    """
+    if not ini_path or not os.path.isfile(ini_path):
+        return ""
+    try:
+        parser = configparser.RawConfigParser(strict=False)
+        parser.optionxform = str
+        with open(ini_path, "r", encoding="utf-8", errors="replace") as fh:
+            raw = fh.read()
+
+        try:
+            parser.read_string(raw)
+        except configparser.MissingSectionHeaderError:
+            parser.read_string("[Settings]\n" + raw)
+
+        for section in parser.sections():
+            for key, value in parser.items(section):
+                if key.strip().lower() == "rl_folder":
+                    return (value or "").strip().strip('"')
+    except Exception:
+        return ""
+    return ""
+
+
+def _detect_rocketlauncher_from_rlui(rlui_exe_or_ini: str, rlui_dir: str) -> dict:
+    """
+    Intenta detectar:
+      - rocketlauncherui_dir
+      - rocketlauncherui_exe
+      - rocketlauncherui_ini
+      - rocketlauncher_dir (desde RL_Folder)
+    """
+    result = {
+        "rocketlauncherui_dir": "",
+        "rocketlauncherui_exe": "",
+        "rocketlauncherui_ini": "",
+        "rocketlauncher_dir": "",
+        "status": "",
+    }
+
+    hint = (rlui_exe_or_ini or "").strip()
+    dir_hint = (rlui_dir or "").strip()
+
+    if hint:
+        if os.path.isdir(hint):
+            dir_hint = hint
+        elif os.path.isfile(hint):
+            lower = hint.lower()
+            if lower.endswith(".ini"):
+                result["rocketlauncherui_ini"] = hint
+                dir_hint = os.path.dirname(hint)
+            else:
+                result["rocketlauncherui_exe"] = hint
+                dir_hint = os.path.dirname(hint)
+
+    if dir_hint and os.path.isdir(dir_hint):
+        result["rocketlauncherui_dir"] = dir_hint
+        exe_candidate = os.path.join(dir_hint, "RocketLauncherUI.exe")
+        ini_candidate = os.path.join(dir_hint, "RocketLauncherUI.ini")
+        if not result["rocketlauncherui_exe"] and os.path.isfile(exe_candidate):
+            result["rocketlauncherui_exe"] = exe_candidate
+        if not result["rocketlauncherui_ini"] and os.path.isfile(ini_candidate):
+            result["rocketlauncherui_ini"] = ini_candidate
+
+    ini_path = result["rocketlauncherui_ini"]
+    if ini_path:
+        rl_folder = _read_rl_folder_from_rlui_ini(ini_path)
+        if rl_folder:
+            if not os.path.isabs(rl_folder):
+                rl_folder = os.path.abspath(os.path.join(os.path.dirname(ini_path), rl_folder))
+            result["rocketlauncher_dir"] = rl_folder
+            ok, _ = _validate_rocketlauncher_dir(rl_folder)
+            if ok:
+                result["status"] = "✓ RocketLauncher detectado desde RocketLauncherUI.ini"
+            else:
+                result["status"] = "⚠ RL_Folder detectado, pero la ruta no parece válida"
+        else:
+            result["status"] = "⚠ No se encontró RL_Folder en RocketLauncherUI.ini"
+    elif result["rocketlauncherui_dir"]:
+        result["status"] = "⚠ No se encontró RocketLauncherUI.ini para autodetección"
+
+    return result
 
 
 # ─── Hilo de escaneo ─────────────────────────────────────────────────────────
@@ -366,6 +454,7 @@ class SetupWizard(QDialog):
         row1 = QHBoxLayout()
         self.inp_rlui_dir = QLineEdit(self.config.get("rocketlauncherui_dir", ""))
         self.inp_rlui_dir.setPlaceholderText("Ej: C:\\RocketLauncherUI")
+        self.inp_rlui_dir.textChanged.connect(self._autodetect_from_rlui_inputs)
         btn1 = QPushButton("Examinar…")
         btn1.setFixedWidth(100)
         btn1.clicked.connect(lambda: self._browse_dir(self.inp_rlui_dir))
@@ -381,12 +470,13 @@ class SetupWizard(QDialog):
 
         row2 = QHBoxLayout()
         self.inp_rlui_exe = QLineEdit(self.config.get("rocketlauncherui_exe", ""))
-        self.inp_rlui_exe.setPlaceholderText("Ej: C:\\RocketLauncherUI\\RocketLauncherUI.exe")
+        self.inp_rlui_exe.setPlaceholderText("Ej: C:\\RocketLauncherUI\\RocketLauncherUI.exe o .ini")
+        self.inp_rlui_exe.textChanged.connect(self._autodetect_from_rlui_inputs)
         btn2 = QPushButton("Examinar…")
         btn2.setFixedWidth(100)
         btn2.clicked.connect(
-            lambda: self._browse_file(self.inp_rlui_exe, "RocketLauncherUI.exe",
-                                      "Ejecutables (*.exe)"))
+            lambda: self._browse_file(self.inp_rlui_exe, "RocketLauncherUI",
+                                      "RocketLauncherUI (*.exe *.ini);;Ejecutables (*.exe);;INI (*.ini)"))
         row2.addWidget(self.inp_rlui_exe)
         row2.addWidget(btn2)
         self.lbl_rlui_exe_status = QLabel("")
@@ -404,6 +494,7 @@ class SetupWizard(QDialog):
         lay.addWidget(self.lbl_rlui_exe_status)
         lay.addStretch()
         lay.addWidget(tip)
+        self._autodetect_from_rlui_inputs()
         return w
 
     def _step_summary(self) -> QWidget:
@@ -529,9 +620,13 @@ class SetupWizard(QDialog):
                 self.lbl_footer_msg.setText(f"RocketLauncher dir: {msg}")
                 return False
         elif self._step == 2:
-            ok1, msg1 = _validate_file(self.inp_rlui_exe.text(), "RocketLauncherUI.exe")
+            rlui_val = self.inp_rlui_exe.text().strip()
+            if rlui_val.lower().endswith(".ini"):
+                ok1, msg1 = _validate_file(rlui_val, "RocketLauncherUI.ini")
+            else:
+                ok1, msg1 = _validate_file(rlui_val, "RocketLauncherUI.exe")
             if not ok1:
-                self.lbl_footer_msg.setText(f"RLUI exe: {msg1}")
+                self.lbl_footer_msg.setText(f"RLUI exe/ini: {msg1}")
                 return False
         return True
 
@@ -542,6 +637,32 @@ class SetupWizard(QDialog):
     def _validate_step_rl(self):
         ok, msg = _validate_rocketlauncher_dir(self.inp_rl.text())
         self._set_status(self.lbl_rl_status, ok, msg)
+
+    def _autodetect_from_rlui_inputs(self):
+        if not hasattr(self, "inp_rlui_exe") or not hasattr(self, "inp_rlui_dir"):
+            return
+        detected = _detect_rocketlauncher_from_rlui(
+            self.inp_rlui_exe.text().strip(),
+            self.inp_rlui_dir.text().strip(),
+        )
+        if detected.get("rocketlauncherui_dir") and not self.inp_rlui_dir.text().strip():
+            self.inp_rlui_dir.setText(detected["rocketlauncherui_dir"])
+        if detected.get("rocketlauncherui_exe") and (
+            not self.inp_rlui_exe.text().strip()
+            or self.inp_rlui_exe.text().strip().lower().endswith(".ini")
+        ):
+            self.inp_rlui_exe.setText(detected["rocketlauncherui_exe"])
+        if detected.get("rocketlauncher_dir"):
+            current_rl = self.inp_rl.text().strip() if hasattr(self, "inp_rl") else ""
+            if not current_rl:
+                self.inp_rl.setText(detected["rocketlauncher_dir"])
+
+        status_msg = detected.get("status", "")
+        if status_msg:
+            is_ok = status_msg.startswith("✓")
+            self._set_status(self.lbl_rlui_exe_status, is_ok, status_msg[2:] if len(status_msg) > 2 else status_msg)
+        elif self.inp_rlui_exe.text().strip() or self.inp_rlui_dir.text().strip():
+            self._set_status(self.lbl_rlui_exe_status, False, "No se pudo autodetectar RocketLauncher desde RLUI.")
 
     def _set_status(self, lbl: QLabel, ok: bool, msg: str):
         if ok:
@@ -562,6 +683,11 @@ class SetupWizard(QDialog):
         elif self._step == 2:
             self.config["rocketlauncherui_dir"] = self.inp_rlui_dir.text().strip()
             self.config["rocketlauncherui_exe"] = self.inp_rlui_exe.text().strip()
+            detected = _detect_rocketlauncher_from_rlui(
+                self.inp_rlui_exe.text().strip(),
+                self.inp_rlui_dir.text().strip(),
+            )
+            self.config["rocketlauncherui_ini"] = detected.get("rocketlauncherui_ini", "")
 
     def _update_summary(self):
         """Actualiza las etiquetas del paso de resumen."""
@@ -716,6 +842,8 @@ class ConfigurationTab(TabModule):
             inp = QLineEdit(self._config.get(key, ""))
             inp.setPlaceholderText("(no configurado)")
             self._path_inputs[key] = inp
+            if key in ("rocketlauncherui_dir", "rocketlauncherui_exe"):
+                inp.textChanged.connect(self._autodetect_paths_from_rlui_fields)
 
             btn = QPushButton("…")
             btn.setFixedWidth(32)
@@ -732,11 +860,16 @@ class ConfigurationTab(TabModule):
 
         btn_validate = QPushButton("Validar rutas")
         btn_validate.clicked.connect(self._validate_paths)
+        self.lbl_rlui_autodetect = QLabel("")
+        self.lbl_rlui_autodetect.setWordWrap(True)
+        self.lbl_rlui_autodetect.setStyleSheet("color: #4a6080; font-size: 12px;")
         self.lbl_validate_result = QLabel("")
         self.lbl_validate_result.setWordWrap(True)
 
-        lay.addWidget(btn_validate, len(defs), 1, 1, 2)
-        lay.addWidget(self.lbl_validate_result, len(defs) + 1, 0, 1, 3)
+        lay.addWidget(self.lbl_rlui_autodetect, len(defs), 0, 1, 3)
+        lay.addWidget(btn_validate, len(defs) + 1, 1, 1, 2)
+        lay.addWidget(self.lbl_validate_result, len(defs) + 2, 0, 1, 3)
+        self._autodetect_paths_from_rlui_fields()
         return gb
 
     # ── Grupo: apariencia ─────────────────────────────────────────────────────
@@ -843,6 +976,41 @@ class ConfigurationTab(TabModule):
     def _collect_fields(self):
         for key, inp in self._path_inputs.items():
             self._config[key] = inp.text().strip()
+        detected = _detect_rocketlauncher_from_rlui(
+            self._config.get("rocketlauncherui_exe", ""),
+            self._config.get("rocketlauncherui_dir", ""),
+        )
+        self._config["rocketlauncherui_ini"] = detected.get("rocketlauncherui_ini", "")
+
+    def _autodetect_paths_from_rlui_fields(self):
+        if not hasattr(self, "_path_inputs"):
+            return
+        inp_rlui = self._path_inputs.get("rocketlauncherui_exe")
+        inp_rlui_dir = self._path_inputs.get("rocketlauncherui_dir")
+        inp_rl = self._path_inputs.get("rocketlauncher_dir")
+        if not inp_rlui or not inp_rlui_dir or not inp_rl:
+            return
+
+        detected = _detect_rocketlauncher_from_rlui(inp_rlui.text().strip(), inp_rlui_dir.text().strip())
+        if detected.get("rocketlauncherui_dir") and not inp_rlui_dir.text().strip():
+            inp_rlui_dir.setText(detected["rocketlauncherui_dir"])
+        if detected.get("rocketlauncherui_exe") and (
+            not inp_rlui.text().strip() or inp_rlui.text().strip().lower().endswith(".ini")
+        ):
+            inp_rlui.setText(detected["rocketlauncherui_exe"])
+        if detected.get("rocketlauncher_dir") and not inp_rl.text().strip():
+            inp_rl.setText(detected["rocketlauncher_dir"])
+
+        msg = detected.get("status", "")
+        if msg:
+            self.lbl_rlui_autodetect.setText(msg)
+            self.lbl_rlui_autodetect.setStyleSheet(
+                f"color: {'#69f0ae' if msg.startswith('✓') else '#ffb74d'}; font-size: 12px;")
+        elif inp_rlui.text().strip() or inp_rlui_dir.text().strip():
+            self.lbl_rlui_autodetect.setText("⚠ No se pudo autodetectar RocketLauncher desde RLUI.")
+            self.lbl_rlui_autodetect.setStyleSheet("color: #ffb74d; font-size: 12px;")
+        else:
+            self.lbl_rlui_autodetect.setText("")
 
     def config_val(self, key: str, default=None):
         return self._config.get(key, default)
@@ -879,8 +1047,12 @@ class ConfigurationTab(TabModule):
         ok, msg = _validate_rocketlauncher_dir(self._config.get("rocketlauncher_dir", ""))
         if not ok: errors.append(f"RocketLauncher dir: {msg}")
 
-        ok, msg = _validate_file(self._config.get("rocketlauncherui_exe", ""), "RocketLauncherUI.exe")
-        if not ok: errors.append(f"RLUI exe: {msg}")
+        rlui_entry = self._config.get("rocketlauncherui_exe", "")
+        if rlui_entry.lower().endswith(".ini"):
+            ok, msg = _validate_file(rlui_entry, "RocketLauncherUI.ini")
+        else:
+            ok, msg = _validate_file(rlui_entry, "RocketLauncherUI.exe")
+        if not ok: errors.append(f"RLUI exe/ini: {msg}")
 
         if errors:
             self.lbl_validate_result.setText("✗ " + "  |  ".join(errors))
