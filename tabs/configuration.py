@@ -9,7 +9,7 @@ import shutil
 from pathlib import Path
 from typing import Callable, Optional
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QLineEdit, QPushButton, QGroupBox,
     QFileDialog, QDialog, QDialogButtonBox,
@@ -17,8 +17,8 @@ from PyQt5.QtWidgets import (
     QStackedWidget, QProgressBar, QComboBox,
     QCheckBox, QApplication, QMessageBox
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt5.QtGui import QColor, QFont
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QColor, QFont
 
 from core.rl_ini_helpers import read_rl_folder_from_rlui_ini
 
@@ -205,7 +205,7 @@ class SetupWizard(QDialog):
         self.setWindowTitle("Configuración inicial — HyperSpin Manager")
         self.setMinimumSize(680, 520)
         self.setModal(True)
-        self.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowTitleHint | Qt.WindowType.WindowCloseButtonHint)
 
         self._step   = 0
         self._steps  = [
@@ -265,7 +265,7 @@ class SetupWizard(QDialog):
         labels = ["1  HyperSpin", "2  RocketLauncher", "3  Ejecutables", "4  Confirmar"]
         for i, lbl in enumerate(labels):
             dot = QLabel(lbl)
-            dot.setAlignment(Qt.AlignCenter)
+            dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
             dot.setStyleSheet("font-size: 11px; font-weight: 600; color: #2a3a55; padding: 0 8px;")
             dot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             self._step_dots.append(dot)
@@ -327,7 +327,7 @@ class SetupWizard(QDialog):
             "Selecciona el directorio raíz de HyperSpin.\n"
             "Debe contener las carpetas: <b>Settings</b>, <b>Media</b> y <b>Databases</b>."
         )
-        desc.setTextFormat(Qt.RichText)
+        desc.setTextFormat(Qt.TextFormat.RichText)
         desc.setWordWrap(True)
         desc.setStyleSheet("color: #6878a0; font-size: 13px; line-height: 1.5;")
 
@@ -345,7 +345,7 @@ class SetupWizard(QDialog):
         self.lbl_hs_status.setStyleSheet("font-size: 12px;")
 
         exe_lbl = QLabel("Ruta al ejecutable <b>HyperSpin.exe</b>:")
-        exe_lbl.setTextFormat(Qt.RichText)
+        exe_lbl.setTextFormat(Qt.TextFormat.RichText)
         exe_lbl.setStyleSheet("color: #6878a0; margin-top: 8px;")
         exe_row = QHBoxLayout()
         self.inp_hs_exe = QLineEdit(self.config.get("hyperspin_exe", ""))
@@ -386,7 +386,7 @@ class SetupWizard(QDialog):
             "Selecciona el directorio raíz de RocketLauncher.\n"
             "Debe contener las carpetas: <b>Modules</b>, <b>Settings</b> y <b>Media</b>."
         )
-        desc.setTextFormat(Qt.RichText)
+        desc.setTextFormat(Qt.TextFormat.RichText)
         desc.setWordWrap(True)
         desc.setStyleSheet("color: #6878a0; font-size: 13px;")
 
@@ -422,7 +422,7 @@ class SetupWizard(QDialog):
 
         # ── RocketLauncherUI dir ─────────────────────────────────────────────
         lbl1 = QLabel("Directorio raíz de <b>RocketLauncherUI</b>:")
-        lbl1.setTextFormat(Qt.RichText)
+        lbl1.setTextFormat(Qt.TextFormat.RichText)
         lbl1.setStyleSheet("color: #6878a0;")
 
         row1 = QHBoxLayout()
@@ -439,7 +439,7 @@ class SetupWizard(QDialog):
 
         # ── RocketLauncherUI exe ─────────────────────────────────────────────
         lbl2 = QLabel("Ruta al ejecutable <b>RocketLauncherUI.exe</b>:")
-        lbl2.setTextFormat(Qt.RichText)
+        lbl2.setTextFormat(Qt.TextFormat.RichText)
         lbl2.setStyleSheet("color: #6878a0; margin-top: 10px;")
 
         row2 = QHBoxLayout()
@@ -517,7 +517,7 @@ class SetupWizard(QDialog):
             "Al finalizar se creará <b>config.json</b> con esta información.\n"
             "Podrás editar estos valores desde la pestaña <b>Configuración</b>."
         )
-        note.setTextFormat(Qt.RichText)
+        note.setTextFormat(Qt.TextFormat.RichText)
         note.setWordWrap(True)
         note.setStyleSheet("color: #3a4a68; font-size: 12px; margin-top: 16px;")
 
@@ -715,9 +715,9 @@ class ConfigurationTab(TabModule):
         self._on_complete_cb = on_complete
 
         wizard = SetupWizard(self._config, parent=self.parent)
-        result = wizard.exec_()
+        result = wizard.exec()
 
-        if result == QDialog.Accepted:
+        if result == QDialog.DialogCode.Accepted:
             self._config = wizard.get_config()
             if self._on_complete_cb:
                 self._on_complete_cb(self._config)
@@ -774,7 +774,7 @@ class ConfigurationTab(TabModule):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         content = QWidget()
         c_lay = QVBoxLayout(content)
@@ -828,7 +828,7 @@ class ConfigurationTab(TabModule):
             else:
                 btn.clicked.connect(lambda _, i=inp, f=filt: self._browse_file(i, f))
 
-            lay.addWidget(lbl, row_i, 0, Qt.AlignVCenter)
+            lay.addWidget(lbl, row_i, 0, Qt.AlignmentFlag.AlignVCenter)
             lay.addWidget(inp, row_i, 1)
             lay.addWidget(btn, row_i, 2)
 
@@ -995,9 +995,9 @@ class ConfigurationTab(TabModule):
             self.parent, "Relanzar asistente",
             "¿Deseas volver a ejecutar el asistente de configuración inicial?\n"
             "Los valores actuales se usarán como punto de partida.",
-            QMessageBox.Yes | QMessageBox.Cancel
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
         )
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             self._collect_fields()
             self.run_setup_wizard(self._config, on_complete=self._on_wizard_done)
 
@@ -1096,7 +1096,7 @@ class ConfigurationTab(TabModule):
             text += f"<br><span style='color:#3a4a68;'>Sistemas: {preview}</span>"
 
         self.lbl_scan_results.setText(text)
-        self.lbl_scan_results.setTextFormat(Qt.RichText)
+        self.lbl_scan_results.setTextFormat(Qt.TextFormat.RichText)
         self.lbl_scan_results.show()
 
         # Guardar resultados del escaneo en config
