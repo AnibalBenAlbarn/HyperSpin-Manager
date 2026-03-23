@@ -1052,7 +1052,52 @@ def save_xml_games(xml_path: str, games: list, menu_name: str = "menu"):
 
     tree = ET.ElementTree(root)
     ET.indent(tree, space="\t")
-    tree.write(xml_path, encoding="UTF-8", xml_declaration=True)
+
+    _create_xml_backup(xml_path, max_backups=5)
+    tmp_path = f"{xml_path}.tmp"
+    try:
+        tree.write(tmp_path, encoding="UTF-8", xml_declaration=True)
+        os.replace(tmp_path, xml_path)
+    finally:
+        if os.path.isfile(tmp_path):
+            os.remove(tmp_path)
+
+
+def _create_xml_backup(xml_path: str, max_backups: int = 5):
+    """
+    Crea backup rotativo antes de sobrescribir XML:
+      - <Sistema>.xml.bak (última copia rápida)
+      - <Sistema>.xml.bak.YYYYmmdd_HHMMSS (histórico)
+    """
+    if not xml_path or not os.path.isfile(xml_path):
+        return
+
+    bak_plain = f"{xml_path}.bak"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    bak_stamped = f"{xml_path}.bak.{timestamp}"
+
+    try:
+        shutil.copy2(xml_path, bak_plain)
+        shutil.copy2(xml_path, bak_stamped)
+    except Exception as e:
+        raise RuntimeError(f"No se pudo crear backup de XML: {e}") from e
+
+    backup_dir = os.path.dirname(xml_path) or "."
+    base_name = os.path.basename(xml_path)
+    stamped = sorted(
+        [
+            os.path.join(backup_dir, n)
+            for n in os.listdir(backup_dir)
+            if n.startswith(base_name + ".bak.")
+        ],
+        key=lambda p: os.path.getmtime(p),
+        reverse=True,
+    )
+    for old in stamped[max_backups:]:
+        try:
+            os.remove(old)
+        except OSError:
+            pass
 
 
 def save_xml_systems(xml_path: str, systems: list, include_comments: bool = True):
@@ -1653,6 +1698,7 @@ class SystemManagerTab(TabModule):
 
     def load_data(self, config: dict):
         self._config = config
+        self._current_system = (config or {}).get("last_selected_system", "")
         # Inicializar servicio INI con ruta al registry junto al config.json
         registry_path = os.path.join(
             os.path.dirname(config.get("hyperspin_dir", "") or "."),
@@ -1662,7 +1708,7 @@ class SystemManagerTab(TabModule):
             self._reload_systems()
 
     def save_data(self) -> dict:
-        return {}
+        return {"last_selected_system": self._current_system}
 
     # ── Construcción UI ────────────────────────────────────────────────────────
 
@@ -2086,6 +2132,24 @@ class SystemManagerTab(TabModule):
             count += 1
 
         self.lbl_count.setText(f"{count} sistemas")
+        self._restore_system_selection()
+
+    def _restore_system_selection(self):
+        desired = (self._current_system or "").lower()
+        if self.system_list.topLevelItemCount() == 0:
+            return
+
+        candidate = None
+        for i in range(self.system_list.topLevelItemCount()):
+            item = self.system_list.topLevelItem(i)
+            if desired and item.text(0).lower() == desired:
+                candidate = item
+                break
+        if candidate is None:
+            candidate = self.system_list.topLevelItem(0)
+
+        if candidate:
+            self.system_list.setCurrentItem(candidate)
 
     # ── Selección de sistema ───────────────────────────────────────────────────
 
@@ -2881,9 +2945,15 @@ class SystemManagerTab(TabModule):
                     if item:
                         self._games_data[r][key] = item.text()
 
-        save_xml_games(xml_path, self._games_data)
-        if self.parent:
-            self.parent.statusBar().showMessage(f"✓ XML guardado: {xml_path}", 5000)
+        try:
+            save_xml_games(xml_path, self._games_data)
+            if self.parent:
+                self.parent.statusBar().showMessage(f"✓ XML guardado: {xml_path}", 5000)
+        except Exception as e:
+            QMessageBox.critical(
+                self.parent, "Error al guardar XML",
+                f"No se pudo guardar el XML.\n{e}"
+            )
 
     # ═══════════════════════════════════════════════════════════════════════════
     # INI AUDIT TAB — Auditor y clasificador de HyperSpin/Settings
