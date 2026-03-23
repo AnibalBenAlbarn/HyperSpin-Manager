@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import configparser
 import os
+import re
 from pathlib import Path, PureWindowsPath
 
 
@@ -14,10 +15,40 @@ def _read_ini(path: str) -> configparser.RawConfigParser | None:
     cfg.optionxform = str
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            cfg.read_string(fh.read())
+            raw = fh.read().lstrip("\ufeff")
+        try:
+            cfg.read_string(raw)
+        except configparser.MissingSectionHeaderError:
+            cfg.read_string("[_ROOT_]\n" + raw)
         return cfg
     except Exception:
         return None
+
+
+def read_rl_folder_from_rlui_ini(ini_path: str) -> str:
+    """
+    Devuelve el valor de ``RL_Folder`` desde ``RocketLauncherUI.ini``.
+    Soporta INI normal, key/value plano y archivos con BOM/preambulo.
+    """
+    cfg = _read_ini(ini_path)
+    if cfg:
+        for section in cfg.sections():
+            for key, value in cfg.items(section):
+                if key.strip().lower() == "rl_folder":
+                    return (value or "").strip().strip('"')
+
+    if not ini_path or not os.path.isfile(ini_path):
+        return ""
+    try:
+        with open(ini_path, "r", encoding="utf-8", errors="replace") as fh:
+            raw = fh.read()
+    except Exception:
+        return ""
+
+    match = re.search(r"(?im)^\s*RL_Folder\s*=\s*(.+?)\s*$", raw)
+    if not match:
+        return ""
+    return match.group(1).strip().strip('"')
 
 
 def parse_rl_emulators_ini(ini_path: str) -> dict:
@@ -27,7 +58,14 @@ def parse_rl_emulators_ini(ini_path: str) -> dict:
     if not cfg:
         return result
 
+    root_section = "_ROOT_"
+    if cfg.has_section(root_section):
+        result["default_emulator"] = cfg.get(root_section, "Default_Emulator", fallback="").strip()
+        result["rom_path"] = cfg.get(root_section, "Rom_Path", fallback="").strip()
+
     for section in cfg.sections():
+        if section == root_section:
+            continue
         if section.lower() == "roms":
             result["default_emulator"] = cfg.get(section, "Default_Emulator", fallback="").strip()
             result["rom_path"] = cfg.get(section, "Rom_Path", fallback="").strip()
