@@ -319,6 +319,59 @@ INI_TYPE_LABELS = {
 REAL_SYSTEM_SECTIONS = {"filters", "themes", "navigation"}
 
 
+def _parse_rom_extensions(raw_exts: str) -> set[str]:
+    """Normaliza Rom_Extension de RL a set con punto: 'zip|7z' -> {'.zip','.7z'}."""
+    if not raw_exts:
+        return set()
+    parts = re.split(r"[|,; ]+", str(raw_exts).strip())
+    out = set()
+    for p in parts:
+        p = p.strip().lower().lstrip(".")
+        if p:
+            out.add(f".{p}")
+    return out
+
+
+def _resolve_rl_path(base_dir: str, raw_path: str) -> str:
+    """Resuelve rutas de RL con ..\\ y separadores mixtos."""
+    if not raw_path:
+        return ""
+    norm = raw_path.replace("\\", os.sep).replace("/", os.sep)
+    if os.path.isabs(norm):
+        return os.path.normpath(norm)
+    return os.path.normpath(os.path.join(base_dir, norm))
+
+
+def _file_stem_maps(folder: str, exts: set[str]) -> tuple[set[str], dict[str, set[str]], dict[str, set[str]]]:
+    """
+    Devuelve:
+      - stems lower exactos
+      - mapa lower -> stems originales
+      - mapa normalizado [a-z0-9] lower -> stems originales
+    """
+    lower_stems: set[str] = set()
+    by_lower: dict[str, set[str]] = {}
+    by_norm: dict[str, set[str]] = {}
+    if not os.path.isdir(folder):
+        return lower_stems, by_lower, by_norm
+    try:
+        for f in os.listdir(folder):
+            full = os.path.join(folder, f)
+            if not os.path.isfile(full):
+                continue
+            if Path(f).suffix.lower() not in exts:
+                continue
+            stem = Path(f).stem
+            stem_l = stem.lower()
+            norm = re.sub(r"[^a-z0-9]", "", stem_l)
+            lower_stems.add(stem_l)
+            by_lower.setdefault(stem_l, set()).add(stem)
+            by_norm.setdefault(norm, set()).add(stem)
+    except PermissionError:
+        pass
+    return lower_stems, by_lower, by_norm
+
+
 # ─── Capa 1: Parser de INI ───────────────────────────────────────────────────
 
 class HyperSpinIniData:
@@ -1300,7 +1353,7 @@ class AuditWorker(QThread):
         self.progress.emit(15, "Indexando archivos de media…")
 
         # ── Índices de archivos existentes por tipo ──────────────────────────
-        wheels  = _file_stems(hs_wheel, WHEEL_EXTS)
+        wheels, wheel_by_lower, wheel_by_norm = _file_stem_maps(hs_wheel, WHEEL_EXTS)
         themes  = _file_stems(hs_theme, THEME_EXTS)
         videos  = _file_stems(hs_video, VIDEO_EXTS)
         art1    = _file_stems(hs_art1,  ARTWORK_EXTS)
@@ -1329,6 +1382,26 @@ class AuditWorker(QThread):
         rl_games  = parse_xml_games(rl_db_path) if rl_db_path else []
         rl_names  = {g["name"].lower() for g in rl_games}
 
+        # ── ROMs vs XML (según Emulators.ini del sistema) ───────────────────
+        emu_ini = os.path.join(rl_dir, "Settings", sys_name, "Emulators.ini") if rl_dir else ""
+        emu_data = parse_rl_emulators_ini(emu_ini) if emu_ini else {}
+        rom_path_raw = emu_data.get("rom_path", "") if emu_data else ""
+        rom_base = os.path.dirname(emu_ini) if emu_ini else ""
+        rom_dir = _resolve_rl_path(rom_base, rom_path_raw) if rom_path_raw else ""
+
+        default_emu = emu_data.get("default_emulator", "") if emu_data else ""
+        emulators = emu_data.get("emulators", {}) if emu_data else {}
+        rom_exts = set(ROM_EXTENSIONS)
+        if default_emu and default_emu in emulators:
+            parsed = _parse_rom_extensions(emulators[default_emu].get("rom_extension", ""))
+            if parsed:
+                rom_exts = parsed
+
+        rom_stems = _file_stems(rom_dir, rom_exts) if rom_dir else set()
+        xml_stems = {g["name"].lower() for g in hs_games}
+        rom_only = sorted(rom_stems - xml_stems)
+        xml_missing_rom = sorted(xml_stems - rom_stems)
+
         total = len(hs_games)
         rows  = []
 
@@ -1338,6 +1411,19 @@ class AuditWorker(QThread):
                 self.progress.emit(pct, f"Auditando {i+1}/{total}: {g['name']}")
 
             name_l = g["name"].lower()
+            name_norm = re.sub(r"[^a-z0-9]", "", name_l)
+            wheel_exact_names = wheel_by_lower.get(name_l, set())
+            wheel_case_issue = bool(wheel_exact_names) and g["name"] not in wheel_exact_names
+            wheel_similar = set()
+            if not wheel_exact_names:
+                wheel_similar = wheel_by_norm.get(name_norm, set())
+            wheel_naming_issue = wheel_case_issue or bool(wheel_similar)
+            if wheel_case_issue:
+                wheel_warning = f"Case distinto: {', '.join(sorted(wheel_exact_names))}"
+            elif wheel_similar:
+                wheel_warning = f"Nombre similar detectado: {', '.join(sorted(wheel_similar)[:3])}"
+            else:
+                wheel_warning = ""
             rows.append({
                 # Datos del juego
                 "name":         g["name"],
@@ -1357,10 +1443,14 @@ class AuditWorker(QThread):
                 "artwork4":     name_l in art4,
                 "bgm":          name_l in bgm,
                 "wheel_sound":  name_l in whs,
+                "wheel_naming_issue": wheel_naming_issue,
+                "wheel_warning": wheel_warning,
                 # Media RocketLauncher
                 "bezel":        name_l in bezel_games,
                 # Cross-check RLUI
                 "in_rl_db":     name_l in rl_names,
+                # ROMs vs XML
+                "has_rom":      name_l in rom_stems,
             })
 
         self.progress.emit(95, "Calculando estadísticas de carpetas…")
@@ -1416,6 +1506,12 @@ class AuditWorker(QThread):
             "hs_count":    len(hs_games),
             "rl_count":    len(rl_games),
             "system_name": sys_name,
+            "rom_audit": {
+                "rom_dir": rom_dir,
+                "xml_without_rom": xml_missing_rom,
+                "rom_without_xml": rom_only,
+                "rom_exts": sorted(rom_exts),
+            },
         })
 
 
@@ -1986,6 +2082,9 @@ class SystemManagerTab(TabModule):
 
         self.lbl_audit_stats = QLabel("")
         self.lbl_audit_stats.setStyleSheet("color: #3a4560; font-size: 12px;")
+        self.lbl_rom_audit = QLabel("")
+        self.lbl_rom_audit.setStyleSheet("color: #8fa2c4; font-size: 12px;")
+        self.lbl_rom_audit.setWordWrap(True)
 
         self.audit_progress = QProgressBar()
         self.audit_progress.setFixedHeight(4)
@@ -2035,6 +2134,7 @@ class SystemManagerTab(TabModule):
 
         lay.addLayout(top_row)
         lay.addWidget(self.audit_progress)
+        lay.addWidget(self.lbl_rom_audit)
         lay.addLayout(filter_row)
         lay.addWidget(self.audit_table, 1)
         return w
@@ -2661,6 +2761,7 @@ class SystemManagerTab(TabModule):
         self.btn_audit.setEnabled(False)
         self.audit_table.setRowCount(0)
         self.lbl_audit_stats.setText("Auditando…")
+        self.lbl_rom_audit.setText("")
 
         self._audit_worker = AuditWorker(sys_name, self._config)
         self._audit_worker.progress.connect(self._on_audit_progress)
@@ -2672,12 +2773,27 @@ class SystemManagerTab(TabModule):
 
     def _on_audit_result(self, result: dict):
         rows              = result.get("rows", [])
-        media_stats       = result.get("media_stats", {})
+        rom_audit         = result.get("rom_audit", {})
         self._audit_rows  = rows
         self.audit_progress.hide()
         self.btn_audit.setEnabled(True)
         self._populate_audit_table(rows)
         self.btn_copy_bezels.setEnabled(True)
+
+        xml_without_rom = rom_audit.get("xml_without_rom", [])
+        rom_without_xml = rom_audit.get("rom_without_xml", [])
+        rom_dir = rom_audit.get("rom_dir", "")
+        if rom_dir:
+            miss_sample = ", ".join(xml_without_rom[:6]) if xml_without_rom else "—"
+            orphan_sample = ", ".join(rom_without_xml[:6]) if rom_without_xml else "—"
+            self.lbl_rom_audit.setText(
+                f"ROMs vs XML · XML sin ROM: {len(xml_without_rom)} · ROMs sin XML: {len(rom_without_xml)}"
+                f"\nRuta ROM: {rom_dir}"
+                f"\nEjemplos XML sin ROM: {miss_sample}"
+                f"\nEjemplos ROM sin XML: {orphan_sample}"
+            )
+        else:
+            self.lbl_rom_audit.setText("ROMs vs XML: sin Rom_Path válido en Emulators.ini.")
 
         # Mostrar stats de carpetas de media en la barra de estado
         hs_count = result.get("hs_count", 0)
@@ -2689,9 +2805,11 @@ class SystemManagerTab(TabModule):
     def _populate_audit_table(self, rows: list):
         # Columnas ampliadas con la estructura real de media
         COLS = ["ROM name", "Descripción", "Wheel", "Theme", "Video",
-                "Art1", "Art2", "Art3", "Art4", "Bezel", "en RLUI", "Activo"]
+                "Art1", "Art2", "Art3", "Art4", "BGM", "Wheel Snd", "Bezel",
+                "en RLUI", "ROM", "Wheel naming", "Activo"]
         COL_KEYS = ["name", "description", "wheel", "theme", "video",
-                    "artwork1", "artwork2", "artwork3", "artwork4", "bezel", "in_rl_db", "enabled"]
+                    "artwork1", "artwork2", "artwork3", "artwork4", "bgm", "wheel_sound",
+                    "bezel", "in_rl_db", "has_rom", "wheel_naming_issue", "enabled"]
 
         self.audit_table.setColumnCount(len(COLS))
         self.audit_table.setHorizontalHeaderLabels(COLS)
@@ -2705,9 +2823,10 @@ class SystemManagerTab(TabModule):
 
         # Columnas booleanas (índice relativo a COL_KEYS)
         bool_keys  = ["wheel", "theme", "video", "artwork1", "artwork2",
-                      "artwork3", "artwork4", "bezel", "in_rl_db", "enabled"]
+                      "artwork3", "artwork4", "bgm", "wheel_sound", "bezel",
+                      "in_rl_db", "has_rom", "wheel_naming_issue", "enabled"]
         # Columnas que son "críticas" (falta = error visible)
-        critical   = {"wheel", "theme", "video"}
+        critical   = {"wheel", "theme", "video", "has_rom"}
 
         counts = {k: 0 for k in bool_keys}
 
@@ -2717,11 +2836,21 @@ class SystemManagerTab(TabModule):
 
                 if key in bool_keys:
                     # Celda booleana
-                    cell = QTableWidgetItem("✓" if val else "✗")
+                    if key == "wheel_naming_issue":
+                        cell = QTableWidgetItem("⚠" if val else "✓")
+                    else:
+                        cell = QTableWidgetItem("✓" if val else "✗")
                     cell.setTextAlignment(Qt.AlignCenter)
-                    if val:
+                    if val and key != "wheel_naming_issue":
                         cell.setForeground(QBrush(C_OK_FG))
                         counts[key] += 1
+                    elif key == "wheel_naming_issue":
+                        if val:
+                            cell.setForeground(QBrush(C_WARN_FG))
+                            cell.setToolTip(game.get("wheel_warning", "Wheel con naming no exacto"))
+                        else:
+                            cell.setForeground(QBrush(C_OK_FG))
+                            counts[key] += 1
                     else:
                         color = C_ERR_FG if key in critical else C_WARN_FG
                         cell.setForeground(QBrush(color))
@@ -2734,7 +2863,8 @@ class SystemManagerTab(TabModule):
         total = len(rows)
         stats_parts = [f"Juegos: {total}"]
         for key, label in [("wheel","Wheel"), ("theme","Theme"), ("video","Video"),
-                            ("bezel","Bezel"), ("in_rl_db","en RLUI")]:
+                            ("bezel","Bezel"), ("in_rl_db","en RLUI"),
+                            ("has_rom","con ROM"), ("wheel_naming_issue","wheel OK naming")]:
             stats_parts.append(f"{label}: {counts[key]}/{total}")
         self.lbl_audit_stats.setText("  ·  ".join(stats_parts))
 
