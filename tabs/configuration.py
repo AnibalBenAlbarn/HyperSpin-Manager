@@ -6,7 +6,6 @@ ConfigurationTab — Asistente de configuración inicial y pestaña de ajustes
 import os
 import json
 import shutil
-import configparser
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -20,6 +19,8 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QColor, QFont
+
+from core.rl_ini_helpers import read_rl_folder_from_rlui_ini
 
 # Importar la clase base (se inyecta desde main)
 try:
@@ -71,33 +72,6 @@ def _validate_file(path: str, filename: str = "") -> tuple[bool, str]:
     return True, "OK"
 
 
-def _read_rl_folder_from_rlui_ini(ini_path: str) -> str:
-    """
-    Lee RL_Folder desde RocketLauncherUI.ini.
-    Soporta INI con sección [Settings] y también formato key=value plano.
-    """
-    if not ini_path or not os.path.isfile(ini_path):
-        return ""
-    try:
-        parser = configparser.RawConfigParser(strict=False)
-        parser.optionxform = str
-        with open(ini_path, "r", encoding="utf-8", errors="replace") as fh:
-            raw = fh.read()
-
-        try:
-            parser.read_string(raw)
-        except configparser.MissingSectionHeaderError:
-            parser.read_string("[Settings]\n" + raw)
-
-        for section in parser.sections():
-            for key, value in parser.items(section):
-                if key.strip().lower() == "rl_folder":
-                    return (value or "").strip().strip('"')
-    except Exception:
-        return ""
-    return ""
-
-
 def _detect_rocketlauncher_from_rlui(rlui_exe_or_ini: str, rlui_dir: str) -> dict:
     """
     Intenta detectar:
@@ -140,7 +114,7 @@ def _detect_rocketlauncher_from_rlui(rlui_exe_or_ini: str, rlui_dir: str) -> dic
 
     ini_path = result["rocketlauncherui_ini"]
     if ini_path:
-        rl_folder = _read_rl_folder_from_rlui_ini(ini_path)
+        rl_folder = read_rl_folder_from_rlui_ini(ini_path)
         if rl_folder:
             if not os.path.isabs(rl_folder):
                 rl_folder = os.path.abspath(os.path.join(os.path.dirname(ini_path), rl_folder))
