@@ -21,6 +21,8 @@ import sys
 import os
 import json
 import traceback
+import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from PyQt5.QtWidgets import (
@@ -36,6 +38,9 @@ APP_NAME    = "HyperSpin Manager"
 APP_VERSION = "1.0.0"
 CONFIG_FILE = "config.json"
 TABS_DIR    = Path(__file__).parent / "tabs"
+ASSETS_DIR  = Path(__file__).parent / "assets"
+QSS_DIR     = ASSETS_DIR / "qss"
+LOG_FILE    = Path(__file__).parent / "hyperspin_manager.log"
 
 # Orden explícito de carga de módulos — (archivo, clase)
 TAB_MANIFEST = [
@@ -317,6 +322,38 @@ QLabel#label_ok       { color: #69f0ae; font-weight: 600; }
 QDialog { background-color: #0d0f14; }
 """
 
+logger = logging.getLogger("hyperspin_manager")
+
+
+def setup_logging(debug: bool = False):
+    level = logging.DEBUG if debug else logging.INFO
+    logger.setLevel(level)
+    logger.handlers.clear()
+
+    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+    file_handler = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    file_handler.setLevel(level)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    stream_handler = logging.StreamHandler(sys.stderr)
+    stream_handler.setLevel(logging.WARNING)
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+
+
+def load_theme_stylesheet(theme: str, custom_qss: str = "") -> str:
+    qss_path = QSS_DIR / f"{theme}.qss"
+    if qss_path.is_file():
+        try:
+            content = qss_path.read_text(encoding="utf-8")
+            return f"{content}\n{custom_qss}".strip()
+        except OSError:
+            logger.warning("No se pudo leer QSS '%s'. Usando fallback.", qss_path)
+    if theme == "dark":
+        return f"{BASE_QSS}\n{custom_qss}".strip()
+    return custom_qss or ""
+
 
 # ─── Utilidades de configuración ──────────────────────────────────────────────
 
@@ -336,7 +373,7 @@ def save_config(cfg: dict) -> bool:
             json.dump(cfg, f, indent=2, ensure_ascii=False)
         return True
     except OSError as e:
-        print(f"[ERROR] No se pudo guardar config.json: {e}")
+        logger.error("No se pudo guardar config.json: %s", e)
         return False
 
 
@@ -444,12 +481,15 @@ class MainWindow(QMainWindow):
 
         act_dark = QAction("Tema oscuro", self)
         act_dark.triggered.connect(lambda: self._apply_theme("dark"))
+        act_light = QAction("Tema claro", self)
+        act_light.triggered.connect(lambda: self._apply_theme("light"))
 
         act_goto = QMenu("Ir a pestaña", self)
         # Las acciones se añaden dinámicamente tras cargar módulos
         self._menu_goto = act_goto
 
         m_view.addAction(act_dark)
+        m_view.addAction(act_light)
         m_view.addMenu(act_goto)
 
         # — Herramientas —
@@ -576,7 +616,7 @@ class MainWindow(QMainWindow):
 
             except Exception as e:
                 tb = traceback.format_exc()
-                print(f"[ERROR] Cargando {filename}/{classname}:\n{tb}")
+                logger.error("Error cargando %s/%s:\n%s", filename, classname, tb)
                 self._register_error_tab(
                     f"{classname} ({filename})", str(e))
 
@@ -588,7 +628,7 @@ class MainWindow(QMainWindow):
             self.tab_widget.addTab(w, instance.tab_title)
         except Exception as e:
             tb = traceback.format_exc()
-            print(f"[ERROR] widget() de '{instance.tab_title}':\n{tb}")
+            logger.error("Error en widget() de '%s':\n%s", instance.tab_title, tb)
             self._register_error_tab(instance.tab_title, str(e))
 
     def _register_error_tab(self, name: str, error: str):
@@ -631,7 +671,7 @@ class MainWindow(QMainWindow):
             try:
                 module.load_data(self.config)
             except Exception as e:
-                print(f"[WARN] load_data en '{module.tab_title}': {e}")
+                logger.warning("load_data en '%s': %s", module.tab_title, e)
 
     # ── Menú → Ir a pestaña ───────────────────────────────────────────────────
 
@@ -654,7 +694,7 @@ class MainWindow(QMainWindow):
                 if partial:
                     self.config.update(partial)
             except Exception as e:
-                print(f"[WARN] save_data en '{module.tab_title}': {e}")
+                logger.warning("save_data en '%s': %s", module.tab_title, e)
 
         if save_config(self.config):
             self.statusBar().showMessage("✓ Configuración guardada en config.json", 4000)
@@ -668,10 +708,10 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self, theme: str):
         custom = self.config.get("theme_qss", "")
-        app    = QApplication.instance()
-        if theme == "dark":
-            app.setStyleSheet(BASE_QSS + "\n" + custom)
-            self.statusBar().showMessage("Tema oscuro aplicado.", 3000)
+        app = QApplication.instance()
+        app.setStyleSheet(load_theme_stylesheet(theme, custom))
+        self.config["theme"] = theme
+        self.statusBar().showMessage(f"Tema {theme} aplicado.", 3000)
 
     def _open_dir(self, config_key: str):
         """Abre el explorador de archivos en el directorio configurado."""
@@ -773,6 +813,9 @@ class MainWindow(QMainWindow):
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 def main():
+    cfg = load_config()
+    setup_logging(bool(cfg.get("debug_logging", False)))
+
     if hasattr(Qt, "AA_EnableHighDpiScaling"):
         QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     if hasattr(Qt, "AA_UseHighDpiPixmaps"):
@@ -781,7 +824,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
-    app.setStyleSheet(BASE_QSS)
+    app.setStyleSheet(load_theme_stylesheet(cfg.get("theme", "dark"), cfg.get("theme_qss", "")))
 
     window = MainWindow()
     window.show()

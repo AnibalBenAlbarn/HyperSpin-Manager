@@ -58,167 +58,13 @@ ROM_EXTENSIONS = {
     ".cso", ".pbp", ".elf", ".xex", ".gcm", ".rvz", ".wad",
 }
 
-# ─── Helpers para parsear INI de RocketLauncher ──────────────────────────────
-
-def parse_rl_emulators_ini(ini_path: str) -> dict:
-    r"""
-    Parsea un Emulators.ini de RocketLauncher (por sistema o global).
-
-    Formato real observado:
-      [ROMS]
-      Default_Emulator=MAME-OLD
-      Rom_Path=..\..\2-ROMS\...
-
-      [MAME-OLD]
-      Emu_Path=..\..\3-EMULADORES\...
-      Rom_Extension=zip
-      Module=..\MAME\MAME-new.ahk
-      Virtual_Emulator=true   (opcional, en Global)
-
-    Returns dict:
-      {
-        "default_emulator": "MAME-OLD",
-        "rom_path": "...",
-        "emulators": {
-          "MAME-OLD": {
-            "emu_path": "...", "rom_extension": "zip",
-            "module": "MAME-new.ahk", "module_folder": "MAME",
-            "virtual": False,
-          }
-        }
-      }
-    """
-    result = {
-        "default_emulator": "",
-        "rom_path":         "",
-        "emulators":        {},
-    }
-    if not ini_path or not os.path.isfile(ini_path):
-        return result
-
-    cfg = configparser.RawConfigParser(strict=False)
-    cfg.optionxform = str
-    try:
-        cfg.read(ini_path, encoding="utf-8", fallback_encoding="latin-1")
-    except Exception:
-        try:
-            cfg.read(ini_path, encoding="latin-1")
-        except Exception:
-            return result
-
-    for section in cfg.sections():
-        sec_l = section.lower()
-        if sec_l == "roms":
-            result["default_emulator"] = cfg.get(section, "Default_Emulator", fallback="").strip()
-            result["rom_path"]         = cfg.get(section, "Rom_Path",          fallback="").strip()
-        else:
-            # Cada sección es un emulador
-            module_raw = cfg.get(section, "Module", fallback="").strip()
-            # Extraer solo el nombre del archivo .ahk y la carpeta del módulo
-            # Formato: "..\MAME\MAME-new.ahk" → folder="MAME", file="MAME-new.ahk"
-            module_file   = Path(module_raw).name   if module_raw else ""
-            module_folder = Path(module_raw).parent.name if module_raw else ""
-
-            result["emulators"][section] = {
-                "emu_path":      cfg.get(section, "Emu_Path",      fallback="").strip(),
-                "rom_extension": cfg.get(section, "Rom_Extension", fallback="").strip(),
-                "module_raw":    module_raw,
-                "module_file":   module_file,
-                "module_folder": module_folder,
-                "virtual":       cfg.get(section, "Virtual_Emulator", fallback="false").lower() == "true",
-            }
-    return result
-
-
-def parse_rl_rocketlauncher_ini(ini_path: str) -> dict:
-    """
-    Parsea un RocketLauncher.ini de sistema.
-    Devuelve dict con secciones y sus valores, marcando los que son 'use_global'.
-
-    Formato real:
-      [Fade]
-      Fade_In=true          ← override
-      Fade_Out=use_global   ← hereda global
-
-      [Bezel]
-      Bezel_Enabled=true    ← override
-
-    Returns:
-      {
-        "overrides": {"Fade_In": "true", "Bezel_Enabled": "true"},
-        "using_global": ["Fade_Out", "Bezel_Instruction_Cards_Enabled", ...],
-        "sections": ["Settings", "Desktop", "Fade", "Bezel", ...],
-        "raw": {section: {key: val}},
-      }
-    """
-    result = {
-        "overrides":    {},
-        "using_global": [],
-        "sections":     [],
-        "raw":          {},
-    }
-    if not ini_path or not os.path.isfile(ini_path):
-        return result
-
-    cfg = configparser.RawConfigParser(strict=False)
-    cfg.optionxform = str
-    try:
-        cfg.read(ini_path, encoding="utf-8", fallback_encoding="latin-1")
-    except Exception:
-        try:
-            cfg.read(ini_path, encoding="latin-1")
-        except Exception:
-            return result
-
-    result["sections"] = cfg.sections()
-    for section in cfg.sections():
-        result["raw"][section] = {}
-        for key, val in cfg.items(section):
-            result["raw"][section][key] = val
-            if val.lower() == "use_global":
-                result["using_global"].append(f"{section}.{key}")
-            else:
-                result["overrides"][f"{section}.{key}"] = val
-    return result
-
-
-def find_module_in_rl(rl_dir: str, module_file: str, module_folder: str) -> str:
-    """
-    Busca el archivo .ahk de un módulo en RocketLauncher/Modules/.
-
-    Estrategias (en orden):
-      1. Modules/<module_folder>/<module_file>   (lo más común)
-      2. Modules/<module_file>                   (sin subcarpeta)
-      3. Busqueda recursiva por nombre de archivo
-
-    Returns la ruta completa si existe, "" si no.
-    """
-    if not rl_dir or not module_file:
-        return ""
-
-    modules_base = os.path.join(rl_dir, "Modules")
-
-    # 1. Con carpeta
-    if module_folder:
-        candidate = os.path.join(modules_base, module_folder, module_file)
-        if os.path.isfile(candidate):
-            return candidate
-
-    # 2. Sin carpeta
-    candidate = os.path.join(modules_base, module_file)
-    if os.path.isfile(candidate):
-        return candidate
-
-    # 3. Búsqueda recursiva (limitada a 2 niveles para no ser lento)
-    if os.path.isdir(modules_base):
-        for d in os.listdir(modules_base):
-            d_path = os.path.join(modules_base, d)
-            if os.path.isdir(d_path):
-                candidate = os.path.join(d_path, module_file)
-                if os.path.isfile(candidate):
-                    return candidate
-
-    return ""
+# ─── Helpers compartidos (core) ─────────────────────────────────────────────
+from core.rl_ini_helpers import (
+    find_module_in_rl,
+    parse_rl_emulators_ini,
+    parse_rl_rocketlauncher_ini,
+)
+from core.module_ini_helpers import remove_games_from_module_ini
 
 # ─── Estructura de media de RocketLauncher (estructura real observada) ──────
 #
@@ -1698,52 +1544,6 @@ class DiffReportDialog(QDialog):
 
 
 # ─── Helper: eliminar entradas del INI de módulo (PCLauncher/TeknoParrot) ────
-
-def _remove_games_from_module_ini(ini_path: str, name_set: set) -> int:
-    """
-    Elimina las entradas de un INI de módulo (PCLauncher o TeknoParrot)
-    cuyos nombres (secciones) estén en name_set (comparación insensible a mayúsculas).
-    Preserva la cabecera de comentarios intacta.
-    Devuelve el número de entradas eliminadas.
-    """
-    if not os.path.isfile(ini_path):
-        return 0
-
-    with open(ini_path, "r", encoding="utf-8", errors="replace") as f:
-        lines = f.readlines()
-
-    # Separar la cabecera (comentarios antes del primer [section]) del cuerpo
-    import re as _re
-    first_sec = next(
-        (i for i, l in enumerate(lines) if _re.match(r"^\s*\[", l)), len(lines))
-    header = lines[:first_sec]
-    body   = lines[first_sec:]
-
-    # Reconstruir el cuerpo eliminando las secciones que coincidan
-    out_body    = []
-    skip        = False
-    removed     = 0
-    current_key = ""
-
-    for line in body:
-        m = _re.match(r"^\s*\[(.+)\]\s*$", line)
-        if m:
-            current_key = m.group(1).strip().lower()
-            if current_key in name_set:
-                skip = True
-                removed += 1
-                continue
-            else:
-                skip = False
-        if not skip:
-            out_body.append(line)
-
-    if removed > 0:
-        with open(ini_path, "w", encoding="utf-8") as f:
-            f.writelines(header + out_body)
-
-    return removed
-
 
 def _read_module_ini(ini_path: str) -> configparser.RawConfigParser:
     """Lee INI de módulo preservando claves no editadas."""
@@ -3442,7 +3242,7 @@ class SystemManagerTab(TabModule):
             if rl_dir and sys_name:
                 mod_ini = os.path.join(rl_dir, "Settings", sys_name, f"{sys_name}.ini")
                 if os.path.isfile(mod_ini):
-                    removed_mod = _remove_games_from_module_ini(mod_ini, name_set)
+                    removed_mod = remove_games_from_module_ini(mod_ini, name_set)
                     if removed_mod > 0:
                         results.append(
                             f"✓ Módulo INI: {removed_mod} entrada(s) eliminada(s) — {mod_ini}")
