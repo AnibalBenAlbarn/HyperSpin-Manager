@@ -25,13 +25,13 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from PyQt6.QtWidgets import (
+from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget,
     QVBoxLayout, QLabel, QMessageBox, QStatusBar,
-    QMenu, QMenuBar
+    QAction, QMenu, QMenuBar
 )
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont, QAction
+from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtGui import QFont
 
 # ─── Constantes ───────────────────────────────────────────────────────────────
 APP_NAME    = "HyperSpin Manager"
@@ -636,26 +636,26 @@ class MainWindow(QMainWindow):
         """Pestaña de error visible al usuario cuando un módulo falla."""
         w   = QWidget()
         lay = QVBoxLayout(w)
-        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.setAlignment(Qt.AlignCenter)
         lay.setSpacing(10)
 
         lbl_icon  = QLabel("⚠")
-        lbl_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_icon.setAlignment(Qt.AlignCenter)
         lbl_icon.setStyleSheet("font-size:42px; color:#ffb74d;")
 
         lbl_title = QLabel(f"Error al cargar: {name}")
-        lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_title.setAlignment(Qt.AlignCenter)
         lbl_title.setStyleSheet("font-size:15px; font-weight:700; color:#ffb74d;")
 
         lbl_err   = QLabel(error[:300])
-        lbl_err.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_err.setAlignment(Qt.AlignCenter)
         lbl_err.setStyleSheet("color:#5a6278; font-size:11px; padding:0 60px;")
         lbl_err.setWordWrap(True)
 
         lbl_hint  = QLabel(
             "Revisa la consola para el traceback completo.\n"
             "El resto de la aplicación sigue funcionando.")
-        lbl_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_hint.setAlignment(Qt.AlignCenter)
         lbl_hint.setStyleSheet("color:#3a4560; font-size:11px;")
 
         lay.addWidget(lbl_icon)
@@ -774,9 +774,9 @@ class MainWindow(QMainWindow):
             )
         msg = QMessageBox(self)
         msg.setWindowTitle("Pestañas activas")
-        msg.setTextFormat(Qt.TextFormat.RichText)
+        msg.setTextFormat(Qt.RichText)
         msg.setText("<br>".join(lines))
-        msg.exec()
+        msg.exec_()
 
     # ── Cierre ────────────────────────────────────────────────────────────────
 
@@ -817,10 +817,10 @@ def main():
     cfg = load_config()
     setup_logging(bool(cfg.get("debug_logging", False)))
 
-    if hasattr(Qt.ApplicationAttribute, "AA_EnableHighDpiScaling"):
-        QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
-    if hasattr(Qt.ApplicationAttribute, "AA_UseHighDpiPixmaps"):
-        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
+    if hasattr(Qt, "AA_EnableHighDpiScaling"):
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    if hasattr(Qt, "AA_UseHighDpiPixmaps"):
+        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
@@ -830,7 +830,7 @@ def main():
     window = MainWindow()
     window.show()
 
-    sys.exit(app.exec())
+    sys.exit(app.exec_())
 
 
 if __name__ == "__main__":
