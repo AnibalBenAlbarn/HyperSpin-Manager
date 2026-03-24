@@ -1916,7 +1916,7 @@ class SystemManagerTab(TabModule):
         self.detail_tabs.addTab(self._build_audit_tab(),      "🔍 Auditoría media")
         self._games_tab_index = self.detail_tabs.addTab(self._build_games_tab(), "🎮 Juegos")
         self.detail_tabs.addTab(self._build_ini_audit_tab(),  "⚙ INI Audit")
-        self.detail_tabs.addTab(self._build_mainmenu_tab(),   "📚 Main Menu")
+        # Nota: "📚 Main Menu" es ahora una pestaña independiente en la barra principal
         return self.detail_tabs
 
     # ── Tab: Carpetas ──────────────────────────────────────────────────────────
@@ -2764,10 +2764,10 @@ class SystemManagerTab(TabModule):
                 f"✓ Auditoría completada — {hs_count} juegos HS  ·  {rl_count} en RLUI", 6000)
 
     def _populate_audit_table(self, rows: list):
-        # Columnas ampliadas con la estructura real de media
-        COLS = ["ROM name", "Descripción", "Wheel", "Theme", "Video",
-                "Art1", "Art2", "Art3", "Art4", "BGM", "Wheel Snd", "Bezel",
-                "en RLUI", "ROM", "Wheel naming", "Activo"]
+        # ── Columnas ────────────────────────────────────────────────────────
+        COLS     = ["ROM name", "Descripción", "Wheel", "Theme", "Video",
+                    "Art1", "Art2", "Art3", "Art4", "BGM", "Wheel Snd", "Bezel",
+                    "en RLUI", "ROM", "Wheel naming", "Activo"]
         COL_KEYS = ["name", "description", "wheel", "theme", "video",
                     "artwork1", "artwork2", "artwork3", "artwork4", "bgm", "wheel_sound",
                     "bezel", "in_rl_db", "has_rom", "wheel_naming_issue", "enabled"]
@@ -2782,51 +2782,108 @@ class SystemManagerTab(TabModule):
 
         self.audit_table.setRowCount(len(rows))
 
-        # Columnas booleanas (índice relativo a COL_KEYS)
-        bool_keys  = ["wheel", "theme", "video", "artwork1", "artwork2",
-                      "artwork3", "artwork4", "bgm", "wheel_sound", "bezel",
-                      "in_rl_db", "has_rom", "wheel_naming_issue", "enabled"]
-        # Columnas que son "críticas" (falta = error visible)
-        critical   = {"wheel", "theme", "video", "has_rom"}
+        # ── Definición de tipos de columnas ─────────────────────────────────
+        bool_keys = ["wheel", "theme", "video", "artwork1", "artwork2",
+                     "artwork3", "artwork4", "bgm", "wheel_sound", "bezel",
+                     "in_rl_db", "has_rom", "wheel_naming_issue", "enabled"]
+        critical  = {"wheel", "theme", "video", "has_rom"}   # falta = fondo rojo
+
+        # Fondos semitransparentes (BGR con alpha simulado via QColor darker)
+        BG_OK   = QColor(0,  80,  30,  45)   # verde muy oscuro semitransparente
+        BG_WARN = QColor(80, 55,  0,   45)   # ámbar muy oscuro semitransparente
+        BG_ERR  = QColor(80, 0,   20,  55)   # rojo muy oscuro semitransparente
 
         counts = {k: 0 for k in bool_keys}
 
         for r, game in enumerate(rows):
+            # ── Determinar color de fila según estado global ─────────────
+            has_critical_missing = any(
+                not game.get(k) for k in critical)
+            has_warn_missing = any(
+                not game.get(k)
+                for k in ["artwork1", "artwork2", "bezel", "bgm"])
+            naming_issue = bool(game.get("wheel_naming_issue"))
+
             for c, key in enumerate(COL_KEYS):
                 val = game.get(key)
 
                 if key in bool_keys:
-                    # Celda booleana
+                    # ── Celda booleana ────────────────────────────────────
                     if key == "wheel_naming_issue":
-                        cell = QTableWidgetItem("⚠" if val else "✓")
+                        symbol = "⚠" if val else "✓"
                     else:
-                        cell = QTableWidgetItem("✓" if val else "✗")
+                        symbol = "✓" if val else "✗"
+
+                    cell = QTableWidgetItem(symbol)
                     cell.setTextAlignment(Qt.AlignCenter)
-                    if val and key != "wheel_naming_issue":
-                        cell.setForeground(QBrush(C_OK_FG))
-                        counts[key] += 1
-                    elif key == "wheel_naming_issue":
+
+                    if key == "wheel_naming_issue":
                         if val:
+                            # Problema de naming: fondo ámbar
                             cell.setForeground(QBrush(C_WARN_FG))
-                            cell.setToolTip(game.get("wheel_warning", "Wheel con naming no exacto"))
+                            cell.setBackground(QBrush(BG_WARN))
+                            cell.setToolTip(game.get("wheel_warning", "Nombre de wheel no exacto"))
                         else:
                             cell.setForeground(QBrush(C_OK_FG))
                             counts[key] += 1
+                    elif val:
+                        # Presente: texto verde + fondo verde muy tenue
+                        cell.setForeground(QBrush(C_OK_FG))
+                        cell.setBackground(QBrush(BG_OK))
+                        counts[key] += 1
                     else:
-                        color = C_ERR_FG if key in critical else C_WARN_FG
-                        cell.setForeground(QBrush(color))
+                        # Faltante: color e intensidad según criticidad
+                        if key in critical:
+                            cell.setForeground(QBrush(C_ERR_FG))
+                            cell.setBackground(QBrush(BG_ERR))
+                        else:
+                            cell.setForeground(QBrush(C_WARN_FG))
+                            cell.setBackground(QBrush(BG_WARN))
+
+                elif key == "name":
+                    cell = QTableWidgetItem(str(val) if val is not None else "")
+                    cell.setForeground(QBrush(QColor("#c8d4ec")))
+                    cell.setFont(QFont("Consolas", 10))
+
+                elif key == "description":
+                    cell = QTableWidgetItem(str(val) if val is not None else "")
+                    cell.setForeground(QBrush(QColor("#a0b0cc")))
+
                 else:
                     cell = QTableWidgetItem(str(val) if val is not None else "")
                     cell.setForeground(QBrush(QColor("#8892a4")))
 
                 self.audit_table.setItem(r, c, cell)
 
+            # ── Colorear fila completa con alpha muy suave ────────────────
+            # Solo las celdas de texto (col 0 y 1) toman el tinte de fila
+            if has_critical_missing:
+                row_bg = QColor(50, 0, 10, 20)
+            elif has_warn_missing or naming_issue:
+                row_bg = QColor(50, 35, 0, 15)
+            else:
+                row_bg = QColor(0, 0, 0, 0)
+
+            for text_col in [0, 1]:
+                item = self.audit_table.item(r, text_col)
+                if item:
+                    item.setBackground(QBrush(row_bg))
+
+        # ── Estadísticas en header ────────────────────────────────────────
         total = len(rows)
         stats_parts = [f"Juegos: {total}"]
-        for key, label in [("wheel","Wheel"), ("theme","Theme"), ("video","Video"),
-                            ("bezel","Bezel"), ("in_rl_db","en RLUI"),
-                            ("has_rom","con ROM"), ("wheel_naming_issue","wheel OK naming")]:
-            stats_parts.append(f"{label}: {counts[key]}/{total}")
+        for key, label in [
+            ("wheel",            "Wheel"),
+            ("theme",            "Theme"),
+            ("video",            "Video"),
+            ("bezel",            "Bezel"),
+            ("in_rl_db",         "en RLUI"),
+            ("has_rom",          "con ROM"),
+            ("wheel_naming_issue", "Naming OK"),
+        ]:
+            cnt = counts[key]
+            pct = int(cnt * 100 / max(total, 1))
+            stats_parts.append(f"{label}: {cnt}/{total} ({pct}%)")
         self.lbl_audit_stats.setText("  ·  ".join(stats_parts))
 
     def _filter_audit_table(self):

@@ -44,11 +44,12 @@ LOG_FILE    = Path(__file__).parent / "hyperspin_manager.log"
 
 # Orden explícito de carga de módulos — (archivo, clase)
 TAB_MANIFEST = [
-    ("dashboard.py",      "DashboardTab"),
-    ("configuration.py",  "ConfigurationTab"),
+    ("dashboard.py",         "DashboardTab"),
     ("system_manager_ui.py", "SystemManagerTab"),
-    ("create_system.py",  "CreateSystemTab"),
-    ("controls.py",       "ControlsTab"),
+    ("mainmenu_tab.py",      "MainMenuTab"),
+    ("create_system.py",     "CreateSystemTab"),
+    ("controls.py",          "ControlsTab"),
+    ("configuration.py",     "ConfigurationTab"),
 ]
 
 # Claves obligatorias para considerar la config completa

@@ -1,14 +1,15 @@
 {
-  "hyperspin_dir": "",
-  "hyperspin_exe": "",
-  "rocketlauncher_dir": "",
-  "rocketlauncherui_dir": "",
-  "rocketlauncherui_exe": "",
+  "hyperspin_dir": "E:/ARCADE/1-HYPERSPIN",
+  "hyperspin_exe": "E:/ARCADE/1-HYPERSPIN/HyperSpin.exe",
+  "rocketlauncher_dir": "E:/ARCADE/1-HYPERSPIN/RocketLauncher",
+  "rocketlauncherui_dir": "E:/ARCADE/1-HYPERSPIN/RocketLauncher/RocketLauncherUI",
+  "rocketlauncherui_exe": "E:/ARCADE/1-HYPERSPIN/RocketLauncher/RocketLauncherUI/RocketLauncherUI.exe",
   "rocketlauncherui_ini": "",
   "window_width": 1280,
   "window_height": 800,
   "window_x": null,
   "window_y": null,
   "active_tab": 0,
-  "last_selected_system": ""
+  "last_selected_system": "Namco System 21",
+  "theme": "dark"
 }
