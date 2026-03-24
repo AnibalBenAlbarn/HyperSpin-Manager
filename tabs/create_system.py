@@ -48,7 +48,7 @@ from typing import Optional
 
 import xml.etree.ElementTree as ET
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QLineEdit, QComboBox,
     QGroupBox, QScrollArea, QFrame, QCheckBox,
@@ -56,8 +56,8 @@ from PyQt5.QtWidgets import (
     QAbstractItemView, QSizePolicy, QDialog, QDialogButtonBox,
     QListWidget, QListWidgetItem, QSplitter
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QColor, QBrush, QFont
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QColor, QBrush, QFont
 
 try:
     from main import TabModule
@@ -1389,7 +1389,7 @@ class CreateSystemTab(TabModule):
 
         lay.addWidget(self._build_topbar())
 
-        splitter = QSplitter(Qt.Horizontal)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(1)
         splitter.setStyleSheet("QSplitter::handle{background:#1e2330;}")
         splitter.addWidget(self._build_form())
@@ -1430,7 +1430,7 @@ class CreateSystemTab(TabModule):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         content = QWidget()
         lay     = QVBoxLayout(content)
@@ -1776,7 +1776,7 @@ class CreateSystemTab(TabModule):
         lay.addWidget(hdr)
         lay.addWidget(self.log_view, 1)
         lay.addWidget(self.create_progress)
-        lay.addWidget(btn_clear, 0, Qt.AlignRight)
+        lay.addWidget(btn_clear, 0, Qt.AlignmentFlag.AlignRight)
         return w
 
     # ── Lógica ────────────────────────────────────────────────────────────────
