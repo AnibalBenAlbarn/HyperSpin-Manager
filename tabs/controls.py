@@ -54,9 +54,9 @@ _CARD   = "#0a0d14"
 _BORDER = "#1a2035"
 _MID    = "#243050"
 _TXT_HI = "#e8edf8"
-_TXT_MD = "#8a9ab8"
-_TXT_LO = "#4a5878"
-_TXT_GH = "#2a3450"
+_TXT_MD = "#b7c5de"
+_TXT_LO = "#8fa2c8"
+_TXT_GH = "#5e7199"
 _MONO   = "'Consolas', 'Courier New', monospace"
 
 # ─── Acciones predefinidas ────────────────────────────────────────────────────
@@ -117,6 +117,7 @@ class ButtonSlot(QWidget):
         self.action  = ""
         self._hover  = False
         self._actions = ARCADE_ACTIONS
+        self._custom_fill: Optional[str] = None
         pad = 14 if shape == self.CIRCLE else 8
         self.setFixedSize(size + pad, size + pad)
         self.setAcceptDrops(True)
@@ -131,6 +132,10 @@ class ButtonSlot(QWidget):
         self.action = action
         self.update()
 
+    def set_custom_fill(self, color: Optional[str]):
+        self._custom_fill = color
+        self.update()
+
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -138,7 +143,7 @@ class ButtonSlot(QWidget):
         cx, cy = w // 2, h // 2
         r = self._size // 2
 
-        color_str = action_color(self.action) if self.action else "#0d1018"
+        color_str = self._custom_fill or (action_color(self.action) if self.action else "#182238")
         base = QColor(color_str).lighter(140) if self._hover else QColor(color_str)
 
         # Sombra
@@ -163,19 +168,19 @@ class ButtonSlot(QWidget):
 
         # Label del slot (esquina superior)
         if self.label:
-            p.setFont(QFont("Consolas", 7, QFont.Bold))
-            p.setPen(QPen(QColor(_TXT_GH)))
+            p.setFont(QFont("Consolas", 8, QFont.Bold))
+            p.setPen(QPen(QColor(_TXT_MD)))
             p.drawText(QRect(0, 2, w, 12), Qt.AlignTop | Qt.AlignHCenter, self.label)
 
         # Acción asignada
         if self.action and self.action != "---":
-            p.setFont(QFont("Segoe UI", 7, QFont.Bold))
+            p.setFont(QFont("Segoe UI", 8, QFont.Bold))
             p.setPen(QPen(QColor(_TXT_HI)))
             rect = QRect(cx - r + 3, cy - 11, r * 2 - 6, 22)
             p.drawText(rect, Qt.AlignCenter | Qt.TextWordWrap, self.action[:14])
         else:
-            p.setFont(QFont("Segoe UI", 8))
-            p.setPen(QPen(QColor(_TXT_GH)))
+            p.setFont(QFont("Segoe UI", 9))
+            p.setPen(QPen(QColor(_TXT_LO)))
             p.drawText(QRect(cx - r, cy - 8, r * 2, 16), Qt.AlignCenter, "—")
 
     def dragEnterEvent(self, event):
@@ -455,7 +460,7 @@ class ArcadeLayout(QWidget):
             f"background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
             f"stop:0 #161a24,stop:1 #0a0d14); "
             f"border: 2px solid #1e2535; border-radius: 14px; }}")
-        self.setMinimumSize(960, 280)
+        self.setMinimumSize(980, 360)
 
         main_lay = QVBoxLayout(self)
         main_lay.setContentsMargins(18, 12, 18, 12)
@@ -542,7 +547,7 @@ class ArcadeLayout(QWidget):
         dirs_row.setSpacing(4)
         for sid, arrow in [(f"{player}_up", "↑"), (f"{player}_dn", "↓"),
                             (f"{player}_lt", "←"), (f"{player}_rt", "→")]:
-            b = ButtonSlot(sid, arrow, ButtonSlot.RECT, 26)
+            b = ButtonSlot(sid, arrow, ButtonSlot.RECT, 34)
             b.set_actions(ARCADE_ACTIONS)
             b.assignment_changed.connect(self._on_slot)
             self._slots[sid] = b
@@ -576,7 +581,7 @@ class ArcadeLayout(QWidget):
 
         for col, row, slot_id in positions:
             num = slot_id.split("_b")[1]
-            btn = ButtonSlot(slot_id, f"B{num}", ButtonSlot.CIRCLE, 44)
+            btn = ButtonSlot(slot_id, f"B{num}", ButtonSlot.CIRCLE, 56)
             btn.set_actions(ARCADE_ACTIONS)
             btn.assignment_changed.connect(self._on_slot)
             btn_lay.addWidget(btn, row, col, Qt.AlignCenter)
@@ -616,7 +621,7 @@ class ArcadeLayout(QWidget):
             rw.setSpacing(8)
             rw.setAlignment(Qt.AlignCenter)
             for slot_id, label in row_def:
-                btn = ButtonSlot(slot_id, label, ButtonSlot.RECT, sz)
+                btn = ButtonSlot(slot_id, label, ButtonSlot.RECT, sz + 8)
                 btn.set_actions(ARCADE_ACTIONS)
                 btn.assignment_changed.connect(self._on_slot)
                 rw.addWidget(btn)
@@ -658,6 +663,7 @@ class GamepadLayout(QWidget):
         super().__init__(parent)
         self.assignments: dict = {}
         self._slots:      dict = {}
+        self._controller_labels = []
         self._theme = "dark"
         self._build()
 
@@ -726,11 +732,11 @@ class GamepadLayout(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
         lbl = QLabel(label)
-        lbl.setFixedWidth(28)
+        lbl.setFixedWidth(36)
         lbl.setStyleSheet(
             f"font-size: 10px; font-weight: 800; color: {_TXT_LO}; "
             f"background: transparent; font-family: {_MONO};")
-        btn = ButtonSlot(sid, label, ButtonSlot.RECT, 32)
+        btn = ButtonSlot(sid, label, ButtonSlot.RECT, 40)
         btn.set_actions(GAMEPAD_ACTIONS)
         btn.assignment_changed.connect(self._on_slot)
         self._slots[sid] = btn
@@ -746,7 +752,7 @@ class GamepadLayout(QWidget):
         ol.setSpacing(3)
 
         w = QWidget()
-        w.setFixedSize(120, 120)
+        w.setMinimumSize(150, 150)
         w.setStyleSheet("background: transparent;")
         lay = QGridLayout(w)
         lay.setSpacing(2)
@@ -756,14 +762,14 @@ class GamepadLayout(QWidget):
             (0, 1, "dpad_up", "↑"), (1, 0, "dpad_left", "←"),
             (1, 2, "dpad_right", "→"), (2, 1, "dpad_down", "↓"),
         ]:
-            btn = ButtonSlot(sid, arrow, ButtonSlot.RECT, 30)
+            btn = ButtonSlot(sid, arrow, ButtonSlot.RECT, 38)
             btn.set_actions(GAMEPAD_ACTIONS)
             btn.assignment_changed.connect(self._on_slot)
             self._slots[sid] = btn
             lay.addWidget(btn, row, col, Qt.AlignCenter)
 
         center = QWidget()
-        center.setFixedSize(30, 30)
+        center.setFixedSize(36, 36)
         center.setStyleSheet(f"background: {_RAISED}; border-radius: 4px;")
         lay.addWidget(center, 1, 1)
 
@@ -779,7 +785,7 @@ class GamepadLayout(QWidget):
         ol.setSpacing(3)
 
         w = QWidget()
-        w.setFixedSize(120, 120)
+        w.setMinimumSize(150, 150)
         w.setStyleSheet("background: transparent;")
         lay = QGridLayout(w)
         lay.setSpacing(2)
@@ -789,8 +795,15 @@ class GamepadLayout(QWidget):
             (0, 1, "btn_y", "Y"), (1, 0, "btn_x", "X"),
             (1, 2, "btn_b", "B"), (2, 1, "btn_a", "A"),
         ]:
-            btn = ButtonSlot(sid, label, ButtonSlot.CIRCLE, 32)
+            btn = ButtonSlot(sid, label, ButtonSlot.CIRCLE, 42)
             btn.set_actions(GAMEPAD_ACTIONS)
+            face_colors = {
+                "btn_a": "#2e7d32",  # A verde
+                "btn_b": "#c62828",  # B rojo
+                "btn_x": "#1565c0",  # X azul
+                "btn_y": "#f9a825",  # Y amarillo
+            }
+            btn.set_custom_fill(face_colors.get(sid))
             btn.assignment_changed.connect(self._on_slot)
             self._slots[sid] = btn
             lay.addWidget(btn, row, col, Qt.AlignCenter)
@@ -814,7 +827,7 @@ class GamepadLayout(QWidget):
         ls_l = QVBoxLayout(ls_w)
         ls_l.setContentsMargins(0, 0, 0, 0)
         ls_l.setSpacing(3)
-        ls_btn = ButtonSlot("ls_click", "L3", ButtonSlot.CIRCLE, 38)
+        ls_btn = ButtonSlot("ls_click", "L3", ButtonSlot.CIRCLE, 46)
         ls_btn.set_actions(GAMEPAD_ACTIONS)
         ls_btn.assignment_changed.connect(self._on_slot)
         self._slots["ls_click"] = ls_btn
@@ -839,7 +852,7 @@ class GamepadLayout(QWidget):
         rs_l = QVBoxLayout(rs_w)
         rs_l.setContentsMargins(0, 0, 0, 0)
         rs_l.setSpacing(3)
-        rs_btn = ButtonSlot("rs_click", "R3", ButtonSlot.CIRCLE, 38)
+        rs_btn = ButtonSlot("rs_click", "R3", ButtonSlot.CIRCLE, 46)
         rs_btn.set_actions(GAMEPAD_ACTIONS)
         rs_btn.assignment_changed.connect(self._on_slot)
         self._slots["rs_click"] = rs_btn
@@ -871,18 +884,19 @@ class GamepadLayout(QWidget):
 
             # Imagen del mando
             img_lbl = QLabel()
-            img_lbl.setFixedSize(200, 160)
+            img_lbl.setMinimumSize(220, 170)
             img_lbl.setAlignment(Qt.AlignCenter)
             img_lbl.setScaledContents(False)
             img_lbl.setStyleSheet("background: transparent;")
             setattr(self, f"_img_lbl_{player}", img_lbl)
+            self._controller_labels.append(img_lbl)
 
             # Label del jugador
             player_lbl = QLabel(label_text)
             player_lbl.setAlignment(Qt.AlignCenter)
             color = _AMBER if player == "p1" else _CYAN
             player_lbl.setStyleSheet(
-                f"font-size: 10px; font-weight: 800; color: {color}; "
+                f"font-size: 12px; font-weight: 800; color: {color}; "
                 f"letter-spacing: 1.5px; background: transparent; font-family: {_MONO};")
 
             col_l.addWidget(img_lbl)
@@ -901,7 +915,7 @@ class GamepadLayout(QWidget):
             vl = QVBoxLayout(vw)
             vl.setContentsMargins(0, 0, 0, 0)
             vl.setSpacing(3)
-            btn = ButtonSlot(sid, label, ButtonSlot.RECT, 28)
+            btn = ButtonSlot(sid, label, ButtonSlot.RECT, 34)
             btn.set_actions(GAMEPAD_ACTIONS)
             btn.assignment_changed.connect(self._on_slot)
             self._slots[sid] = btn
@@ -913,6 +927,10 @@ class GamepadLayout(QWidget):
         # Cargar imágenes iniciales
         QTimer.singleShot(100, self._update_controller_images)
         return w
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_controller_images()
 
     def _update_controller_images(self):
         """Carga y redimensiona la imagen del mando según el tema."""
@@ -1009,6 +1027,9 @@ class ControlsTab(TabModule):
         splitter.addWidget(editor_w)
         splitter.addWidget(right_panel)
         splitter.setSizes([170, 740, 280])
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 0)
         root_lay.addWidget(splitter, 1)
 
         # Hint bar
@@ -1028,11 +1049,11 @@ class ControlsTab(TabModule):
 
     def _build_toolbar(self) -> QWidget:
         bar = QWidget()
-        bar.setFixedHeight(52)
+        bar.setMinimumHeight(56)
         bar.setStyleSheet(
             f"background: {_DEEP}; border-bottom: 1px solid {_BORDER};")
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(16, 0, 16, 0)
+        lay.setContentsMargins(16, 8, 16, 8)
         lay.setSpacing(12)
 
         dot = QLabel("●")
@@ -1047,6 +1068,7 @@ class ControlsTab(TabModule):
             f"font-size: 11px; font-weight: 600; color: {_TXT_LO}; background: transparent;")
         self.cmb_system = QComboBox()
         self.cmb_system.setMinimumWidth(170)
+        self.cmb_system.setMinimumHeight(34)
         self.cmb_system.addItem("(todos los sistemas)")
         self.cmb_system.currentTextChanged.connect(self._on_system_changed)
 
@@ -1115,7 +1137,7 @@ class ControlsTab(TabModule):
 
         self.lbl_active = QLabel("Perfil: Default  ·  Modo: Arcade  ·  8 botones")
         self.lbl_active.setStyleSheet(
-            f"font-size: 11px; font-weight: 700; font-family: {_MONO}; "
+            f"font-size: 12px; font-weight: 700; font-family: {_MONO}; "
             f"color: {_AMBER}; background: transparent; letter-spacing: 0.5px;")
 
         scroll = QScrollArea()
@@ -1146,7 +1168,9 @@ class ControlsTab(TabModule):
 
     def _build_right_panel(self) -> QWidget:
         w = QWidget()
-        w.setFixedWidth(270)
+        w.setMinimumWidth(300)
+        w.setMaximumWidth(420)
+        w.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         w.setStyleSheet(
             f"background: {_CARD}; border-left: 1px solid {_BORDER};")
         lay = QVBoxLayout(w)
@@ -1249,7 +1273,7 @@ class ControlsTab(TabModule):
         lay.addWidget(section_header("ASIGNACIONES ACTUALES"))
         self.txt_summary = QTextEdit()
         self.txt_summary.setReadOnly(True)
-        self.txt_summary.setFixedHeight(110)
+        self.txt_summary.setMinimumHeight(140)
         self.txt_summary.setStyleSheet(
             f"QTextEdit {{ background: {_DEEP}; border: 1px solid {_BORDER}; "
             f"color: {_TXT_LO}; font-family: {_MONO}; font-size: 11px; "
@@ -1349,7 +1373,9 @@ class ControlsTab(TabModule):
     def _apply_profile(self, name: str):
         data  = self._profiles.get(name, {})
         mode  = data.get("_mode", "arcade")
+        btn_mode = int(data.get("_btn_mode", 8))
         self._set_mode(mode)
+        self._set_btn_mode(6 if btn_mode == 6 else 8)
         asgn  = {k: v for k, v in data.items() if not k.startswith("_")}
         layout = self.arcade_layout if mode == "arcade" else self.gamepad_layout
         layout.set_assignments(asgn)
@@ -1361,6 +1387,7 @@ class ControlsTab(TabModule):
         data   = layout.get_assignments()
         data["_mode"]   = self._current_mode
         data["_system"] = self._current_system
+        data["_btn_mode"] = 6 if self.btn_6btn.isChecked() else 8
         self._profiles[name] = data
         prof_dir = self._get_profile_dir()
         if prof_dir:
