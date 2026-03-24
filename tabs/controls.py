@@ -9,7 +9,7 @@ import configparser
 from pathlib import Path
 from typing import Optional
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QComboBox, QLineEdit,
     QGroupBox, QScrollArea, QFrame, QSplitter,
@@ -18,11 +18,11 @@ from PyQt5.QtWidgets import (
     QDialogButtonBox, QCheckBox, QTextEdit, QButtonGroup,
     QRadioButton, QApplication
 )
-from PyQt5.QtCore import (
+from PyQt6.QtCore import (
     Qt, QMimeData, QPoint, QRect, QSize,
     pyqtSignal, QTimer
 )
-from PyQt5.QtGui import (
+from PyQt6.QtGui import (
     QColor, QPainter, QPen, QBrush, QFont,
     QFontMetrics, QDrag, QPainterPath, QPixmap,
     QLinearGradient, QRadialGradient, QPalette,
@@ -122,7 +122,7 @@ class ButtonSlot(QWidget):
         self.setFixedSize(size + pad, size + pad)
         self.setAcceptDrops(True)
         self.setMouseTracking(True)
-        self.setCursor(Qt.PointingHandCursor)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(f"Slot: {slot_id}\nDoble clic para asignar · Clic derecho para borrar")
 
     def set_actions(self, actions: list):
@@ -147,7 +147,7 @@ class ButtonSlot(QWidget):
         base = QColor(color_str).lighter(140) if self._hover else QColor(color_str)
 
         # Sombra
-        p.setPen(Qt.NoPen)
+        p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(QColor(0, 0, 0, 100)))
         if self.shape == self.CIRCLE:
             p.drawEllipse(cx - r + 2, cy - r + 2, r * 2, r * 2)
@@ -170,18 +170,18 @@ class ButtonSlot(QWidget):
         if self.label:
             p.setFont(QFont("Consolas", 8, QFont.Bold))
             p.setPen(QPen(QColor(_TXT_MD)))
-            p.drawText(QRect(0, 2, w, 12), Qt.AlignTop | Qt.AlignHCenter, self.label)
+            p.drawText(QRect(0, 2, w, 12), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter, self.label)
 
         # Acción asignada
         if self.action and self.action != "---":
             p.setFont(QFont("Segoe UI", 8, QFont.Bold))
             p.setPen(QPen(QColor(_TXT_HI)))
             rect = QRect(cx - r + 3, cy - 11, r * 2 - 6, 22)
-            p.drawText(rect, Qt.AlignCenter | Qt.TextWordWrap, self.action[:14])
+            p.drawText(rect, Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, self.action[:14])
         else:
             p.setFont(QFont("Segoe UI", 9))
             p.setPen(QPen(QColor(_TXT_LO)))
-            p.drawText(QRect(cx - r, cy - 8, r * 2, 16), Qt.AlignCenter, "—")
+            p.drawText(QRect(cx - r, cy - 8, r * 2, 16), Qt.AlignmentFlag.AlignCenter, "—")
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasText():
@@ -208,7 +208,7 @@ class ButtonSlot(QWidget):
         self.update()
 
     def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             action, ok = QInputDialog.getItem(
                 self, f"Asignar — {self.slot_id}", "Acción:",
                 [a for a in self._actions], 0, False)
@@ -228,7 +228,7 @@ class DraggableActionItem(QWidget):
         super().__init__(parent)
         self.action = action
         self.setFixedHeight(30)
-        self.setCursor(Qt.OpenHandCursor)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(8, 3, 8, 3)
         lay.setSpacing(8)
@@ -247,7 +247,7 @@ class DraggableActionItem(QWidget):
         lay.addStretch()
 
     def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.LeftButton:
+        if event.buttons() & Qt.MouseButton.LeftButton:
             drag = QDrag(self)
             mime = QMimeData()
             mime.setText(self.action)
@@ -257,15 +257,15 @@ class DraggableActionItem(QWidget):
             painter = QPainter(pix)
             painter.setRenderHint(QPainter.Antialiasing)
             painter.setBrush(QBrush(QColor(action_color(self.action))))
-            painter.setPen(Qt.NoPen)
+            painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRoundedRect(0, 0, 170, 30, 5, 5)
             painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
             painter.setPen(QPen(QColor(_TXT_HI)))
-            painter.drawText(QRect(0, 0, 170, 30), Qt.AlignCenter, self.action)
+            painter.drawText(QRect(0, 0, 170, 30), Qt.AlignmentFlag.AlignCenter, self.action)
             painter.end()
             drag.setPixmap(pix)
             drag.setHotSpot(event.pos())
-            drag.exec_(Qt.CopyAction)
+            drag.exec(Qt.DropAction.CopyAction)
 
 
 # ─── ActionPalette ────────────────────────────────────────────────────────────
@@ -303,7 +303,7 @@ class ActionPalette(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(f"background: {_CARD};")
 
         content = QWidget()
@@ -334,7 +334,7 @@ class StickCanvas(QWidget):
         self.accent = QColor(accent_color)
         self._gate = gate
         self.setFixedSize(100, 100)
-        self.setCursor(Qt.PointingHandCursor)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip("Clic derecho para cambiar el restrictor de la palanca")
 
     def set_gate(self, gate: str):
@@ -370,13 +370,13 @@ class StickCanvas(QWidget):
             p.drawEllipse(cx - 30, cy - 30, 60, 60)
 
         # Base del stick
-        p.setPen(Qt.NoPen)
+        p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(QColor("#1a1a1a")))
         p.drawEllipse(cx - r, cy - r, r * 2, r * 2)
 
         # Anillo de acento
         p.setPen(QPen(self.accent, 2))
-        p.setBrush(Qt.NoBrush)
+        p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawEllipse(cx - r, cy - r, r * 2, r * 2)
 
         # Líneas de dirección
@@ -397,7 +397,7 @@ class StickCanvas(QWidget):
         p.setFont(QFont("Consolas", 7))
         p.setPen(QPen(QColor(_TXT_GH)))
         gate_txt = {"octagonal": "OCT", "square": "SQR", "circular": "CIR"}.get(self._gate, "")
-        p.drawText(QRect(cx - 20, cy + r - 14, 40, 12), Qt.AlignCenter, gate_txt)
+        p.drawText(QRect(cx - 20, cy + r - 14, 40, 12), Qt.AlignmentFlag.AlignCenter, gate_txt)
 
 
 # ─── ArcadeLayout ────────────────────────────────────────────────────────────
@@ -476,13 +476,13 @@ class ArcadeLayout(QWidget):
             f"letter-spacing: 1.8px; font-family: {_MONO}; background: transparent;")
 
         mode_lbl = QLabel(f"{'6 BTN' if self._btn_mode == 6 else '8 BTN'} MODE")
-        mode_lbl.setAlignment(Qt.AlignCenter)
+        mode_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         mode_lbl.setStyleSheet(
             f"color: {_TXT_GH}; font-size: 9px; font-weight: 700; "
             f"letter-spacing: 1px; font-family: {_MONO}; background: transparent;")
 
         p2_lbl = QLabel("PLAYER 2 ●")
-        p2_lbl.setAlignment(Qt.AlignRight)
+        p2_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
         p2_lbl.setStyleSheet(
             f"color: {_CYAN}; font-size: 11px; font-weight: 800; "
             f"letter-spacing: 1.8px; font-family: {_MONO}; background: transparent;")
@@ -553,8 +553,8 @@ class ArcadeLayout(QWidget):
             self._slots[sid] = b
             dirs_row.addWidget(b)
 
-        stick_lay.addWidget(stick, 0, Qt.AlignHCenter)
-        stick_lay.addWidget(gate_cmb, 0, Qt.AlignHCenter)
+        stick_lay.addWidget(stick, 0, Qt.AlignmentFlag.AlignHCenter)
+        stick_lay.addWidget(gate_cmb, 0, Qt.AlignmentFlag.AlignHCenter)
         stick_lay.addLayout(dirs_row)
 
         # ── Botones ───────────────────────────────────────────────────────────
@@ -584,7 +584,7 @@ class ArcadeLayout(QWidget):
             btn = ButtonSlot(slot_id, f"B{num}", ButtonSlot.CIRCLE, 56)
             btn.set_actions(ARCADE_ACTIONS)
             btn.assignment_changed.connect(self._on_slot)
-            btn_lay.addWidget(btn, row, col, Qt.AlignCenter)
+            btn_lay.addWidget(btn, row, col, Qt.AlignmentFlag.AlignCenter)
             self._slots[slot_id] = btn
 
         lay.addWidget(stick_w)
@@ -619,7 +619,7 @@ class ArcadeLayout(QWidget):
         for row_def, sz in zip(rows_def, sizes):
             rw = QHBoxLayout()
             rw.setSpacing(8)
-            rw.setAlignment(Qt.AlignCenter)
+            rw.setAlignment(Qt.AlignmentFlag.AlignCenter)
             for slot_id, label in row_def:
                 btn = ButtonSlot(slot_id, label, ButtonSlot.RECT, sz + 8)
                 btn.set_actions(ARCADE_ACTIONS)
@@ -628,7 +628,7 @@ class ArcadeLayout(QWidget):
                 self._slots[slot_id] = btn
             p_lay.addLayout(rw)
 
-        lay.addWidget(panel, 0, Qt.AlignCenter)
+        lay.addWidget(panel, 0, Qt.AlignmentFlag.AlignCenter)
         lay.addStretch()
         return w
 
@@ -719,7 +719,7 @@ class GamepadLayout(QWidget):
 
     def _btn_label(self, text: str) -> QLabel:
         lbl = QLabel(text)
-        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setStyleSheet(
             f"font-size: 9px; font-weight: 700; letter-spacing: 0.8px; "
             f"color: {_TXT_GH}; background: transparent; font-family: {_MONO};")
@@ -766,7 +766,7 @@ class GamepadLayout(QWidget):
             btn.set_actions(GAMEPAD_ACTIONS)
             btn.assignment_changed.connect(self._on_slot)
             self._slots[sid] = btn
-            lay.addWidget(btn, row, col, Qt.AlignCenter)
+            lay.addWidget(btn, row, col, Qt.AlignmentFlag.AlignCenter)
 
         center = QWidget()
         center.setFixedSize(36, 36)
@@ -806,7 +806,7 @@ class GamepadLayout(QWidget):
             btn.set_custom_fill(face_colors.get(sid))
             btn.assignment_changed.connect(self._on_slot)
             self._slots[sid] = btn
-            lay.addWidget(btn, row, col, Qt.AlignCenter)
+            lay.addWidget(btn, row, col, Qt.AlignmentFlag.AlignCenter)
 
         ol.addWidget(w)
         ol.addWidget(self._btn_label("BOTONES"))
@@ -831,7 +831,7 @@ class GamepadLayout(QWidget):
         ls_btn.set_actions(GAMEPAD_ACTIONS)
         ls_btn.assignment_changed.connect(self._on_slot)
         self._slots["ls_click"] = ls_btn
-        ls_l.addWidget(ls_btn, 0, Qt.AlignHCenter)
+        ls_l.addWidget(ls_btn, 0, Qt.AlignmentFlag.AlignHCenter)
         ls_l.addWidget(self._btn_label("L STICK CLICK"))
         lay.addWidget(ls_w)
         lay.addStretch()
@@ -856,7 +856,7 @@ class GamepadLayout(QWidget):
         rs_btn.set_actions(GAMEPAD_ACTIONS)
         rs_btn.assignment_changed.connect(self._on_slot)
         self._slots["rs_click"] = rs_btn
-        rs_l.addWidget(rs_btn, 0, Qt.AlignHCenter)
+        rs_l.addWidget(rs_btn, 0, Qt.AlignmentFlag.AlignHCenter)
         rs_l.addWidget(self._btn_label("R STICK CLICK"))
         lay.addWidget(rs_w)
         lay.addStretch()
@@ -866,13 +866,13 @@ class GamepadLayout(QWidget):
         w = QWidget()
         w.setStyleSheet("background: transparent;")
         lay = QVBoxLayout(w)
-        lay.setAlignment(Qt.AlignCenter)
+        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.setSpacing(10)
 
         # Fila de mandos P1 y P2
         controllers_row = QHBoxLayout()
         controllers_row.setSpacing(24)
-        controllers_row.setAlignment(Qt.AlignCenter)
+        controllers_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         for player, label_text in [("p1", "PLAYER 1"), ("p2", "PLAYER 2")]:
             col_w = QWidget()
@@ -880,12 +880,12 @@ class GamepadLayout(QWidget):
             col_l = QVBoxLayout(col_w)
             col_l.setContentsMargins(0, 0, 0, 0)
             col_l.setSpacing(6)
-            col_l.setAlignment(Qt.AlignCenter)
+            col_l.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
             # Imagen del mando
             img_lbl = QLabel()
             img_lbl.setMinimumSize(220, 170)
-            img_lbl.setAlignment(Qt.AlignCenter)
+            img_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             img_lbl.setScaledContents(False)
             img_lbl.setStyleSheet("background: transparent;")
             setattr(self, f"_img_lbl_{player}", img_lbl)
@@ -893,7 +893,7 @@ class GamepadLayout(QWidget):
 
             # Label del jugador
             player_lbl = QLabel(label_text)
-            player_lbl.setAlignment(Qt.AlignCenter)
+            player_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             color = _AMBER if player == "p1" else _CYAN
             player_lbl.setStyleSheet(
                 f"font-size: 12px; font-weight: 800; color: {color}; "
@@ -908,7 +908,7 @@ class GamepadLayout(QWidget):
         # Select / Start
         spec_row = QHBoxLayout()
         spec_row.setSpacing(14)
-        spec_row.setAlignment(Qt.AlignCenter)
+        spec_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
         for sid, label in [("btn_select", "SELECT"), ("btn_start", "START")]:
             vw = QWidget()
             vw.setStyleSheet("background: transparent;")
@@ -919,7 +919,7 @@ class GamepadLayout(QWidget):
             btn.set_actions(GAMEPAD_ACTIONS)
             btn.assignment_changed.connect(self._on_slot)
             self._slots[sid] = btn
-            vl.addWidget(btn, 0, Qt.AlignHCenter)
+            vl.addWidget(btn, 0, Qt.AlignmentFlag.AlignHCenter)
             vl.addWidget(self._btn_label(label))
             spec_row.addWidget(vw)
         lay.addLayout(spec_row)
@@ -944,7 +944,7 @@ class GamepadLayout(QWidget):
                 if not pix.isNull():
                     scaled = pix.scaled(
                         lbl.width(), lbl.height(),
-                        Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                        Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                     lbl.setPixmap(scaled)
                     lbl.setToolTip(f"Mando {player.upper()}")
             else:
@@ -1015,7 +1015,7 @@ class ControlsTab(TabModule):
 
         root_lay.addWidget(self._build_toolbar())
 
-        splitter = QSplitter(Qt.Horizontal)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(1)
         splitter.setStyleSheet(f"QSplitter::handle {{ background: {_BORDER}; }}")
 
@@ -1148,7 +1148,7 @@ class ControlsTab(TabModule):
         content = QWidget()
         content.setStyleSheet(f"background: {_BASE};")
         c_lay = QVBoxLayout(content)
-        c_lay.setAlignment(Qt.AlignCenter)
+        c_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         c_lay.setContentsMargins(0, 8, 0, 8)
 
         self.arcade_layout  = ArcadeLayout(btn_mode=8)

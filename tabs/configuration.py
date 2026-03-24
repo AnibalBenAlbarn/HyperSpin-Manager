@@ -9,7 +9,7 @@ import shutil
 from pathlib import Path
 from typing import Callable, Optional
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QLineEdit, QPushButton, QGroupBox,
     QFileDialog, QDialog, QDialogButtonBox,
@@ -17,8 +17,8 @@ from PyQt5.QtWidgets import (
     QStackedWidget, QProgressBar, QComboBox,
     QCheckBox, QApplication, QMessageBox
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt5.QtGui import QColor, QFont
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QColor, QFont
 
 from core.rl_ini_helpers import read_rl_folder_from_rlui_ini
 
@@ -221,7 +221,7 @@ class SetupWizard(QDialog):
         self.setWindowTitle("Configuración inicial — HyperSpin Manager")
         self.setMinimumSize(720, 560)
         self.setModal(True)
-        self.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowTitleHint | Qt.WindowType.WindowCloseButtonHint)
         self.setStyleSheet(f"""
             QDialog {{ background: {self._DEEP}; }}
             QWidget {{ background: {self._DEEP}; color: {self._TXT_MD}; font-size: 13px; }}
@@ -292,7 +292,7 @@ class SetupWizard(QDialog):
         labels = ["1  HyperSpin", "2  RocketLauncher", "3  Ejecutables", "4  Confirmar"]
         for i, lbl_txt in enumerate(labels):
             dot = QLabel(lbl_txt)
-            dot.setAlignment(Qt.AlignCenter)
+            dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
             dot.setStyleSheet(
                 f"font-size: 10px; font-weight: 700; color: {self._TXT_GH}; "
                 f"padding: 0 8px; letter-spacing: 0.8px; background: transparent;")
@@ -370,7 +370,7 @@ class SetupWizard(QDialog):
     def _desc_label(self, text: str) -> QLabel:
         lbl = QLabel(text)
         lbl.setWordWrap(True)
-        lbl.setTextFormat(Qt.RichText)
+        lbl.setTextFormat(Qt.TextFormat.RichText)
         lbl.setStyleSheet(
             f"font-size: 12px; color: {self._TXT_GH}; background: transparent; "
             f"line-height: 1.5; padding: 12px; border-left: 2px solid {self._BORDER}; "
@@ -584,7 +584,7 @@ class SetupWizard(QDialog):
         note = QLabel(
             "Se creará <b>config.json</b> con esta configuración. "
             "Puedes editarla después en la pestaña <b>⚙ Configuración</b>.")
-        note.setTextFormat(Qt.RichText)
+        note.setTextFormat(Qt.TextFormat.RichText)
         note.setWordWrap(True)
         note.setStyleSheet(
             f"font-size: 11px; color: {self._TXT_GH}; background: transparent; "
@@ -815,7 +815,7 @@ class ConfigurationTab(TabModule):
         self._config = dict(config)
         self._on_complete_cb = on_complete
         wizard = SetupWizard(self._config, parent=self.parent)
-        result = wizard.exec_()
+        result = wizard.exec()
         if result == QDialog.Accepted:
             self._config = wizard.get_config()
             if self._on_complete_cb:
@@ -854,7 +854,7 @@ class ConfigurationTab(TabModule):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(f"background: {self._DEEP}; border: none;")
 
         content = QWidget()
@@ -974,8 +974,8 @@ class ConfigurationTab(TabModule):
             else:
                 btn.clicked.connect(lambda _, i=inp, f=filt: self._browse_file(i, f))
 
-            b_lay.addWidget(dot, row_i, 0, Qt.AlignVCenter)
-            b_lay.addWidget(lbl, row_i, 1, Qt.AlignVCenter)
+            b_lay.addWidget(dot, row_i, 0, Qt.AlignmentFlag.AlignVCenter)
+            b_lay.addWidget(lbl, row_i, 1, Qt.AlignmentFlag.AlignVCenter)
             b_lay.addWidget(inp, row_i, 2)
             b_lay.addWidget(btn, row_i, 3)
 

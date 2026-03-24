@@ -5,13 +5,13 @@ Extraído de SystemManagerTab para tener acceso directo desde la barra principal
 """
 
 import os
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QListWidget, QSplitter, QGroupBox,
     QInputDialog, QMessageBox, QFrame, QSizePolicy
 )
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QColor, QBrush
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QColor, QBrush
 
 from utils import mainmenu_utils
 

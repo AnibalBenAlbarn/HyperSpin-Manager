@@ -6,13 +6,13 @@ DashboardTab — Panel de estado general con diseño premium.
 import os
 from pathlib import Path
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QSizePolicy, QPushButton, QScrollArea,
     QGridLayout, QProgressBar, QSpacerItem
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt5.QtGui import QColor, QFont
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QColor, QFont
 
 from core.dashboard_stats import collect_dashboard_stats
 
@@ -227,7 +227,7 @@ class IncompleteRow(QWidget):
 
         pct_lbl = QLabel(f"{pct}%")
         pct_lbl.setFixedWidth(40)
-        pct_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        pct_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         pct_lbl.setStyleSheet(
             f"font-size: 10px; font-weight: 700; font-family: {_MONO}; "
             f"color: {color}; background: transparent;")
@@ -282,7 +282,7 @@ class DashboardTab(TabModule):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(f"background: {_DEEP}; border: none;")
 
         body = QWidget()
@@ -466,7 +466,7 @@ class DashboardTab(TabModule):
         self._incomplete_lay.setSpacing(0)
 
         placeholder = QLabel("Sin datos — pulsa Actualizar para escanear.")
-        placeholder.setAlignment(Qt.AlignCenter)
+        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         placeholder.setStyleSheet(
             f"font-size: 12px; color: {_TEXT_GHOST}; padding: 24px; background: transparent;")
         self._incomplete_lay.addWidget(placeholder)
@@ -587,7 +587,7 @@ class DashboardTab(TabModule):
                 self._incomplete_lay.addWidget(sep)
         else:
             ok_lbl = QLabel("✓  Todos los sistemas tienen media completa")
-            ok_lbl.setAlignment(Qt.AlignCenter)
+            ok_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             ok_lbl.setStyleSheet(
                 f"font-size: 13px; font-weight: 600; color: {_GREEN}; "
                 f"padding: 32px; background: transparent;")
