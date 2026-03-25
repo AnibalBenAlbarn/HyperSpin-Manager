@@ -13,7 +13,7 @@ import math
 import threading
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QComboBox, QPushButton, QFrame, QSizePolicy
+    QLabel, QComboBox, QPushButton, QFrame, QSizePolicy, QStackedWidget
 )
 from PyQt6.QtCore import (
     Qt, QTimer, QRectF, QPointF, pyqtSignal, QObject
@@ -408,6 +408,99 @@ class XboxControllerWidget(QWidget):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  ArcadeTemplateWidget — layout arcade estilo plano técnico
+# ══════════════════════════════════════════════════════════════════════════════
+
+class ArcadeTemplateWidget(QWidget):
+    """
+    Dibuja un template arcade inspirado en planos (36 mm) usando QPainter.
+    Incluye palanca a la izquierda y botonera de 8 botones en dos hileras.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumSize(520, 340)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._active = {f"arc_b{i}": False for i in range(1, 9)}
+        self._active.update({"arc_up": False, "arc_down": False, "arc_left": False, "arc_right": False})
+
+    def set_button(self, name: str, pressed: bool):
+        if name in self._active:
+            self._active[name] = pressed
+            self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        W, H = self.width(), self.height()
+
+        # Fondo tipo plano técnico
+        p.fillRect(self.rect(), QColor("#efefef"))
+
+        margin = 24
+        area = QRectF(margin, margin, W - margin * 2, H - margin * 2)
+        p.setPen(QPen(QColor("#555"), 1.2))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRect(area)
+
+        # Escala visual basada en diámetro 36 mm (solo proporcional)
+        d = min(area.width() / 15.0, area.height() / 8.0)
+        r = d / 2.0
+
+        # Centro joystick (izquierda)
+        joy_cx = area.left() + d * 2.0
+        joy_cy = area.top() + area.height() * 0.58
+        self._draw_hole(p, joy_cx, joy_cy, r, "JOY", self._joy_active())
+
+        # Botonera: dos filas estilo imagen (4 arriba + 4 abajo, con offset)
+        start_x = area.left() + d * 7.0
+        top_y = area.top() + d * 2.0
+        bot_y = top_y + d * 2.0
+        pitch = d * 1.45
+        offset = d * 0.65
+
+        top_names = ["arc_b1", "arc_b2", "arc_b3", "arc_b4"]
+        bot_names = ["arc_b5", "arc_b6", "arc_b7", "arc_b8"]
+
+        for i, sid in enumerate(top_names):
+            cx = start_x + i * pitch
+            self._draw_hole(p, cx, top_y, r, f"B{i+1}", self._active[sid], accent=_AMBER)
+
+        for i, sid in enumerate(bot_names):
+            cx = start_x + offset + i * pitch
+            self._draw_hole(p, cx, bot_y, r, f"B{i+5}", self._active[sid], accent=_CYAN)
+
+        # Líneas de cotas (estilo plantilla)
+        p.setPen(QPen(QColor("#777"), 1))
+        p.drawLine(int(joy_cx), int(joy_cy + d * 0.9), int(start_x), int(joy_cy + d * 0.9))
+        p.drawLine(int(start_x), int(top_y + d * 2.8), int(start_x + pitch * 3), int(top_y + d * 2.8))
+        p.drawLine(int(start_x), int(top_y - d * 0.9), int(start_x + pitch), int(top_y - d * 0.9))
+        p.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
+        p.setPen(QPen(QColor("#444")))
+        p.drawText(QRectF(start_x, top_y - d * 1.25, pitch, 18), Qt.AlignmentFlag.AlignCenter, "36 mm")
+        p.drawText(QRectF(start_x, top_y + d * 2.9, pitch * 2, 18), Qt.AlignmentFlag.AlignCenter, "36 mm")
+        p.drawText(QRectF((joy_cx + start_x) / 2 - 40, joy_cy + d, 80, 18), Qt.AlignmentFlag.AlignCenter, "116.5 mm")
+
+    def _draw_hole(self, p: QPainter, cx: float, cy: float, r: float, label: str, active: bool, accent: str = "#111"):
+        ring_col = QColor(accent if active else "#111")
+        center_col = QColor("#0e0e0e" if active else "#222")
+        p.setPen(QPen(QColor("#222"), 1.2))
+        p.setBrush(QBrush(QColor(255, 255, 255, 0)))
+        p.drawEllipse(QPointF(cx, cy), r, r)
+        p.setPen(QPen(ring_col, 2 if active else 1.2))
+        p.drawEllipse(QPointF(cx, cy), r * 0.38, r * 0.38)
+        p.setBrush(QBrush(center_col))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QPointF(cx, cy), r * 0.14, r * 0.14)
+        p.setPen(QPen(QColor("#333")))
+        p.setFont(QFont("Consolas", 8, QFont.Weight.Bold))
+        p.drawText(QRectF(cx - r, cy + r + 3, r * 2, 14), Qt.AlignmentFlag.AlignCenter, label)
+
+    def _joy_active(self) -> bool:
+        return any(self._active[k] for k in ("arc_up", "arc_down", "arc_left", "arc_right"))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  StickWidget — visualizador del stick analógico
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -736,7 +829,7 @@ class ControllerTesterWidget(QWidget):
         sep.setStyleSheet(f"color:{_BORDER};")
         root.addWidget(sep)
 
-        # ── Área central: mando + sticks ───────────────────────────────────
+        # ── Área central: mando/arcade + sticks ────────────────────────────
         center = QHBoxLayout()
         center.setSpacing(12)
 
@@ -744,9 +837,14 @@ class ControllerTesterWidget(QWidget):
         self._stick_l = StickWidget("L")
         center.addWidget(self._stick_l, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        # Mando Xbox
+        # Vista central con dos templates
+        self._center_stack = QStackedWidget()
         self._controller = XboxControllerWidget()
-        center.addWidget(self._controller, 1)
+        self._arcade_template = ArcadeTemplateWidget()
+        self._center_stack.addWidget(self._arcade_template)   # index 0
+        self._center_stack.addWidget(self._controller)        # index 1
+        self._center_stack.setCurrentIndex(0)
+        center.addWidget(self._center_stack, 1)
 
         # Stick derecho
         self._stick_r = StickWidget("R")
@@ -800,7 +898,8 @@ class ControllerTesterWidget(QWidget):
 
     def _on_category_changed(self):
         self._current_category = "arcade" if self._cmb_category.currentIndex() == 0 else "consola"
-        self._restore_slot_state()
+
+        self._center_stack.setCurrentIndex(0 if self._current_category == "arcade" else 1)
 
     def _on_slot_changed(self):
         self._current_slot = self._cmb_slot.currentText() or "1"
@@ -853,6 +952,7 @@ class ControllerTesterWidget(QWidget):
         if jid != self._selected_jid:
             return
         self._controller.set_button(name, pressed)
+        self._set_arcade_from_console_button(name, pressed)
         state = "▼" if pressed else "▲"
         cat = "Arcade" if self._current_category == "arcade" else "Consola"
         self._log.log(f"[{cat} M{self._current_slot}] {name} {state}")
@@ -866,6 +966,36 @@ class ControllerTesterWidget(QWidget):
         else:
             self._stick_r.set_pos(x, y)
             self._controller.set_axis("right", x, y)
+        self._set_arcade_from_axis(stick, x, y)
+
+    _CONSOLE_TO_ARCADE = {
+        "btn_a": "arc_b1",
+        "btn_b": "arc_b2",
+        "btn_x": "arc_b3",
+        "btn_y": "arc_b4",
+        "lb": "arc_b5",
+        "rb": "arc_b6",
+        "lt": "arc_b7",
+        "rt": "arc_b8",
+        "dpad_up": "arc_up",
+        "dpad_down": "arc_down",
+        "dpad_left": "arc_left",
+        "dpad_right": "arc_right",
+    }
+
+    def _set_arcade_from_console_button(self, name: str, pressed: bool):
+        arc_name = self._CONSOLE_TO_ARCADE.get(name)
+        if arc_name:
+            self._arcade_template.set_button(arc_name, pressed)
+
+    def _set_arcade_from_axis(self, stick: str, x: float, y: float):
+        if stick != "left":
+            return
+        th = 0.45
+        self._arcade_template.set_button("arc_left", x < -th)
+        self._arcade_template.set_button("arc_right", x > th)
+        self._arcade_template.set_button("arc_up", y < -th)
+        self._arcade_template.set_button("arc_down", y > th)
 
     # ── Teclado ────────────────────────────────────────────────────────────
     _KEY_MAP = {
@@ -953,7 +1083,9 @@ class ControllerTesterWidget(QWidget):
         self._cmb_slot.blockSignals(True)
         self._cmb_slot.setCurrentText(self._current_slot)
         self._cmb_slot.blockSignals(False)
-        self._restore_slot_state()
+
+        self._center_stack.setCurrentIndex(0 if self._current_category == "arcade" else 1)
+
 
 
 class ControlsTab(TabModule):
