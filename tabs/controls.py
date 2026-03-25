@@ -23,6 +23,17 @@ from PyQt6.QtGui import (
     QRadialGradient, QLinearGradient, QFont, QKeyEvent
 )
 
+try:
+    from main import TabModule
+except ImportError:
+    class TabModule:
+        tab_title = "Módulo"
+        tab_icon = ""
+        def __init__(self, parent): self.parent = parent
+        def widget(self): raise NotImplementedError
+        def load_data(self, config): pass
+        def save_data(self): return {}
+
 # ─── Intentar importar pygame para SDL/XInput/DirectInput ───────────────────
 try:
     import pygame
@@ -794,6 +805,28 @@ class ControllerTesterWidget(QWidget):
         if PYGAME_OK:
             pygame.quit()
         super().closeEvent(event)
+
+
+class ControlsTab(TabModule):
+    """Adaptador del probador de mandos para integrarlo como pestaña cargable."""
+    tab_title = "🎮 Controls"
+    tab_icon = ""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._widget = None
+
+    def widget(self):
+        if self._widget is None:
+            self._widget = ControllerTesterWidget()
+        return self._widget
+
+    def load_data(self, config: dict):
+        # Este módulo no depende de config.json por ahora.
+        return None
+
+    def save_data(self) -> dict:
+        return {}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
