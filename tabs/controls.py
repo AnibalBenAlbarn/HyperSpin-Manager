@@ -1082,7 +1082,7 @@ class ControlsTab(TabModule):
         self._splitter.addWidget(self._palette)
         self._splitter.addWidget(self._editor_w)
         self._splitter.addWidget(self._right_panel)
-        self._splitter.setSizes([195, 0, 275])
+        self._splitter.setSizes([195, 820, 275])
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
         self._splitter.setStretchFactor(2, 0)
@@ -1302,7 +1302,7 @@ class ControlsTab(TabModule):
         self._palette.setParent(None); self._palette.deleteLater()
         self._palette = new_pal
         sp.insertWidget(idx, self._palette)
-        sp.setSizes([195, 0, 275])
+        sp.setSizes([195, 820, 275])
         sp.setStretchFactor(0, 0); sp.setStretchFactor(1, 1); sp.setStretchFactor(2, 0)
         self._update_label()
 
