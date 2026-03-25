@@ -1,1485 +1,818 @@
 """
-tabs/controls.py
-ControlsTab — Editor visual de perfiles de control para HyperSpin Manager
-
-v4 — Layout visual estilo PCSX2/Citron:
- - GamepadWidget: mando Xbox dibujado en QPainter, botones clicables superpuestos
- - ArcadeWidget:  panel arcade dibujado (cuerpo madera, stick real, botonera)
- - Sin dependencia de PNGs externos — todo se dibuja con PyQt6
- - Texto con alto contraste, fuentes claras
+controller_tester.py
+Probador de mandos — PyQt6
+- Mando Xbox dibujado en QPainter (fiel al original blanco sobre negro)
+- Stick analógico dibujado en QPainter
+- Detección de mandos conectados (SDL2 / XInput / DirectInput vía pygame)
+- Captura de botones: teclado, mando SDL/XInput, DirectInput
+- Selector desplegable: Mando 1, Mando 2, etc.
 """
 
-import os
-import json
+import sys
 import math
-import configparser
-from pathlib import Path
-from typing import Optional
-
+import threading
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QLabel, QPushButton, QComboBox, QLineEdit,
-    QScrollArea, QFrame, QSplitter,
-    QFileDialog, QMessageBox, QInputDialog,
-    QSizePolicy, QTextEdit, QDialog, QListWidget, QListWidgetItem,
-    QDialogButtonBox
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QComboBox, QPushButton, QFrame, QSizePolicy
 )
 from PyQt6.QtCore import (
-    Qt, QMimeData, QRect, QRectF, QPointF,
-    pyqtSignal, QTimer, QPoint, QSize
+    Qt, QTimer, QRectF, QPointF, pyqtSignal, QObject
 )
 from PyQt6.QtGui import (
-    QColor, QPainter, QPen, QBrush, QFont, QFontMetrics,
-    QDrag, QPixmap, QRadialGradient, QLinearGradient,
-    QPolygon, QPolygonF, QPainterPath
+    QPainter, QPen, QBrush, QColor, QPainterPath,
+    QRadialGradient, QLinearGradient, QFont, QKeyEvent
 )
 
+# ─── Intentar importar pygame para SDL/XInput/DirectInput ───────────────────
 try:
-    from tabs.create_system import make_joytokey_cfg
-except ImportError:
-    def make_joytokey_cfg(name: str) -> str:
-        return f"; JoyToKey cfg for {name}\n[General]\nFileVersion=51\n"
+    import pygame
+    import pygame.joystick
+    pygame.init()
+    pygame.joystick.init()
+    PYGAME_OK = True
+except Exception:
+    PYGAME_OK = False
 
-try:
-    from main import TabModule
-except ImportError:
-    class TabModule:
-        tab_title = "Modulo"
-        tab_icon = ""
-        def __init__(self, parent): self.parent = parent
-        def widget(self): raise NotImplementedError
-        def load_data(self, config): pass
-        def save_data(self): return {}
+# ─── Paleta ──────────────────────────────────────────────────────────────────
+_BG       = "#0a0c10"
+_CARD     = "#0d1018"
+_BORDER   = "#1a2035"
+_MID      = "#1e2840"
+_AMBER    = "#f5a623"
+_CYAN     = "#00c9e8"
+_GREEN    = "#00e599"
+_RED      = "#e8192c"
+_TXT_HI   = "#ffffff"
+_TXT_MD   = "#dde6f8"
+_TXT_LO   = "#b0c4e8"
+_TXT_GH   = "#8099cc"
 
-
-# ─── Paleta ───────────────────────────────────────────────────────────────────
-_AMBER  = "#f5a623"
-_CYAN   = "#00c9e8"
-_GREEN  = "#00e599"
-_DEEP   = "#05070b"
-_BASE   = "#090c12"
-_RAISED = "#0d1018"
-_CARD   = "#0a0d14"
-_BORDER = "#1a2035"
-_MID    = "#243050"
-_TXT_HI = "#ffffff"
-_TXT_MD = "#dde6f8"
-_TXT_LO = "#b0c4e8"
-_TXT_GH = "#8099cc"
-_MONO   = "'Consolas', 'Courier New', monospace"
-
-_COL_A    = "#1db954"
-_COL_B    = "#e8192c"
-_COL_X    = "#2a6bbf"
-_COL_Y    = "#f5c518"
-_COL_BUMP = "#3a4a6a"
-_COL_TRIG = "#2a3a5a"
-_COL_STICK= "#222840"
-_COL_DPAD = "#1e2840"
-_COL_SYS  = "#1a2030"
-
-ARCADE_ACTIONS = [
-    "Start P1", "Start P2", "Coin P1", "Coin P2",
-    "Pause", "Exit", "Config",
-    "Button 1", "Button 2", "Button 3", "Button 4",
-    "Button 5", "Button 6", "Button 7", "Button 8",
-    "Up", "Down", "Left", "Right",
-    "Service", "Test", "---",
-]
-
-GAMEPAD_ACTIONS = [
-    "A -- Confirmar/Accion", "B -- Cancelar/Volver",
-    "X -- Acc. Secundaria",  "Y -- Acc. Terciaria",
-    "LB -- Bumper Izq", "RB -- Bumper Der",
-    "LT -- Gatillo Izq", "RT -- Gatillo Der",
-    "L3 -- Pulsar Stick Izq", "R3 -- Pulsar Stick Der",
-    "Start", "Select / Back",
-    "D-Up", "D-Down", "D-Left", "D-Right",
-    "LS -- Mover Personaje", "RS -- Mover Camara",
-    "Pause", "Exit", "---",
-]
-
-ACTION_COLORS = {
-    "Start P1": "#1565c0", "Start P2": "#1565c0",
-    "Coin P1": "#4a148c", "Coin P2": "#4a148c",
-    "Pause": "#1b5e20", "Exit": "#b71c1c", "Config": "#e65100",
-    "Button 1": "#c62828", "Button 2": "#283593",
-    "Button 3": "#1b5e20", "Button 4": "#c47800",
-    "Button 5": "#880e4f", "Button 6": "#006064",
-    "Button 7": "#37474f", "Button 8": "#4e342e",
-    "---": "#1e2330",
-}
-DEFAULT_ACTION_COLOR = "#1e3a5f"
-
-
-def action_color(action: str) -> str:
-    if not action or action == "---":
-        return "#1e2330"
-    return ACTION_COLORS.get(action, DEFAULT_ACTION_COLOR)
+# Colores botones Xbox (imagen original: blanco con botones de colores)
+_COL_A = "#1db954"   # verde
+_COL_B = "#e8192c"   # rojo
+_COL_X = "#2a6bbf"   # azul
+_COL_Y = "#f5c518"   # amarillo
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  ActionPickerDialog
+#  XboxControllerWidget  — dibuja el mando Xbox fiel a la imagen de referencia
 # ══════════════════════════════════════════════════════════════════════════════
 
-class ActionPickerDialog(QDialog):
-    def __init__(self, actions: list, current: str = "", parent=None):
+class XboxControllerWidget(QWidget):
+    """
+    Mando Xbox One dibujado en QPainter.
+    Cuerpo blanco sobre fondo negro, botones de colores,
+    sticks grises, D-pad gris, bumpers, gatillos, logo Xbox central.
+    Los botones/zonas se iluminan cuando están activos.
+    """
+
+    # IDs de zona → (cx_rel, cy_rel, shape, label, color_normal, color_active, radio_rel)
+    _ZONES = {
+        # botones cara
+        "btn_y":      (0.775, 0.40, "circle", "Y",   "#f5c518", "#ffe566", 0.044),
+        "btn_b":      (0.840, 0.515,"circle", "B",   "#e8192c", "#ff6060", 0.044),
+        "btn_x":      (0.710, 0.515,"circle", "X",   "#2a6bbf", "#5599ff", 0.044),
+        "btn_a":      (0.775, 0.63, "circle", "A",   "#1db954", "#44ff88", 0.044),
+        # bumpers
+        "lb":         (0.205, 0.195,"pill",   "LB",  "#b0b0b0", _AMBER,   0.070),
+        "rb":         (0.795, 0.195,"pill",   "RB",  "#b0b0b0", _AMBER,   0.070),
+        # gatillos
+        "lt":         (0.185, 0.095,"pill",   "LT",  "#c0c0c0", _AMBER,   0.078),
+        "rt":         (0.815, 0.095,"pill",   "RT",  "#c0c0c0", _AMBER,   0.078),
+        # select/start
+        "select":     (0.415, 0.415,"rect",   "⧉",   "#909090", _CYAN,    0.040),
+        "start":      (0.585, 0.415,"rect",   "≡",   "#909090", _CYAN,    0.040),
+        # home
+        "home":       (0.500, 0.295,"circle", "X",   "#107020", "#33ff66", 0.058),
+        # D-pad (cada brazo)
+        "dpad_up":    (0.275, 0.565,"dpad",   "▲",   "#909090", _AMBER,   0.038),
+        "dpad_down":  (0.275, 0.695,"dpad",   "▼",   "#909090", _AMBER,   0.038),
+        "dpad_left":  (0.215, 0.630,"dpad",   "◀",   "#909090", _AMBER,   0.038),
+        "dpad_right": (0.335, 0.630,"dpad",   "▶",   "#909090", _AMBER,   0.038),
+        # sticks (press L3/R3)
+        "ls":         (0.345, 0.510,"circle", "L3",  "#606060", _CYAN,    0.085),
+        "rs":         (0.640, 0.660,"circle", "R3",  "#606060", _CYAN,    0.085),
+    }
+
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Seleccionar accion")
-        self.setMinimumSize(320, 420)
-        self.setStyleSheet(
-            f"QDialog{{background:{_BASE};color:{_TXT_HI};}}"
-            f"QListWidget{{background:{_RAISED};border:1px solid {_BORDER};"
-            f"color:{_TXT_HI};font-size:13px;border-radius:6px;}}"
-            f"QListWidget::item:selected{{background:{_MID};color:{_AMBER};}}"
-            f"QListWidget::item:hover{{background:#111a28;}}"
-            f"QLineEdit{{background:{_RAISED};border:1px solid {_BORDER};"
-            f"color:{_TXT_HI};font-size:13px;border-radius:5px;padding:4px 8px;}}")
-        lay = QVBoxLayout(self)
-        lay.setSpacing(8)
-        self._search = QLineEdit()
-        self._search.setPlaceholderText("Filtrar...")
-        self._search.textChanged.connect(self._filter)
-        lay.addWidget(self._search)
-        self._list = QListWidget()
-        self._all  = actions
-        self._populate(actions, current)
-        lay.addWidget(self._list, 1)
-        bb = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        bb.setStyleSheet(
-            f"QPushButton{{background:{_MID};color:{_TXT_HI};border:1px solid {_BORDER};"
-            f"border-radius:5px;padding:5px 18px;font-weight:700;}}"
-            f"QPushButton:hover{{background:{_BORDER};color:{_AMBER};}}")
-        bb.accepted.connect(self.accept)
-        bb.rejected.connect(self.reject)
-        lay.addWidget(bb)
-        self._list.itemDoubleClicked.connect(lambda _: self.accept())
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMinimumSize(520, 370)
+        # estado activo de cada zona
+        self._active: dict[str, bool] = {k: False for k in self._ZONES}
+        # posición de los sticks (−1..+1)
+        self._ls = QPointF(0.0, 0.0)
+        self._rs = QPointF(0.0, 0.0)
 
-    def _populate(self, actions, current=""):
-        self._list.clear()
-        for a in actions:
-            item = QListWidgetItem(a)
-            item.setForeground(QColor(_TXT_HI))
-            self._list.addItem(item)
-            if a == current:
-                self._list.setCurrentItem(item)
+    def set_button(self, name: str, pressed: bool):
+        if name in self._active:
+            self._active[name] = pressed
+            self.update()
 
-    def _filter(self, text: str):
-        self._populate([a for a in self._all if text.lower() in a.lower()])
+    def set_axis(self, stick: str, x: float, y: float):
+        if stick == "left":
+            self._ls = QPointF(max(-1, min(1, x)), max(-1, min(1, y)))
+        else:
+            self._rs = QPointF(max(-1, min(1, x)), max(-1, min(1, y)))
+        self.update()
 
-    def selected_action(self) -> str:
-        item = self._list.currentItem()
-        return item.text() if item else ""
+    # ── pintado ────────────────────────────────────────────────────────────
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        W, H = self.width(), self.height()
+        self._draw(p, W, H)
+
+    def _draw(self, p: QPainter, W: int, H: int):
+        # márgenes
+        mx, my = int(W * 0.03), int(H * 0.04)
+        ew, eh = W - mx * 2, H - my * 2
+
+        def cx(r): return int(mx + r * ew)
+        def cy(r): return int(my + r * eh)
+        def sz(r): return int(min(ew, eh) * r)
+
+        bx, by = cx(0.05), cy(0.10)
+        bw = cx(0.95) - bx
+        bh = cy(0.92) - by
+
+        # ── sombra del cuerpo ──────────────────────────────────────────────
+        body = self._body_path(bx, by, bw, bh)
+        p.save(); p.translate(5, 6)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(QColor(0, 0, 0, 120)))
+        p.drawPath(body); p.restore()
+
+        # ── cuerpo blanco ─────────────────────────────────────────────────
+        body = self._body_path(bx, by, bw, bh)
+        grad = QLinearGradient(bx + bw / 2, by, bx + bw / 2, by + bh)
+        grad.setColorAt(0.0, QColor("#f8f8f8"))
+        grad.setColorAt(0.45, QColor("#e8e8e8"))
+        grad.setColorAt(1.0, QColor("#d0d0d0"))
+        p.setBrush(QBrush(grad))
+        p.setPen(QPen(QColor("#c0c0c0"), 1.5))
+        p.drawPath(body)
+
+        # ── brillo superior ────────────────────────────────────────────────
+        hi = QPainterPath()
+        hi.moveTo(bx + bw * 0.30, by + 3)
+        hi.quadTo(bx + bw * 0.50, by - 4, bx + bw * 0.70, by + 3)
+        hi.quadTo(bx + bw * 0.50, by + bh * 0.12, bx + bw * 0.30, by + 3)
+        hi_g = QLinearGradient(0, by, 0, by + bh * 0.12)
+        hi_g.setColorAt(0, QColor(255, 255, 255, 80))
+        hi_g.setColorAt(1, QColor(255, 255, 255, 0))
+        p.setBrush(QBrush(hi_g)); p.setPen(Qt.PenStyle.NoPen)
+        p.drawPath(hi)
+
+        # ── surco central superior ─────────────────────────────────────────
+        groove = QPainterPath()
+        groove.moveTo(bx + bw * 0.32, by + bh * 0.08)
+        groove.quadTo(bx + bw * 0.50, by + bh * 0.28, bx + bw * 0.68, by + bh * 0.08)
+        p.setPen(QPen(QColor("#b8b8b8"), 2.5))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPath(groove)
+
+        # ── bumpers ────────────────────────────────────────────────────────
+        self._draw_bumper(p, cx, cy, sz, "lb", side="left")
+        self._draw_bumper(p, cx, cy, sz, "rb", side="right")
+
+        # ── gatillos ──────────────────────────────────────────────────────
+        self._draw_trigger(p, cx, cy, sz, "lt", side="left")
+        self._draw_trigger(p, cx, cy, sz, "rt", side="right")
+
+        # ── zona central (panel gris oscuro) ───────────────────────────────
+        panel_w = int(bw * 0.36)
+        panel_h = int(bh * 0.22)
+        panel_x = cx(0.5) - panel_w // 2
+        panel_y = cy(0.34) - panel_h // 2
+        pp = QPainterPath()
+        pp.addRoundedRect(QRectF(panel_x, panel_y, panel_w, panel_h), 10, 10)
+        p.setBrush(QBrush(QColor("#d8d8d8")))
+        p.setPen(QPen(QColor("#b0b0b0"), 1))
+        p.drawPath(pp)
+
+        # ── logo Xbox (círculo + X) ────────────────────────────────────────
+        lx, ly = cx(0.50), cy(0.24)
+        lr = sz(0.055)
+        home_active = self._active.get("home", False)
+        lg = QRadialGradient(lx, ly, lr * 1.4)
+        if home_active:
+            lg.setColorAt(0, QColor("#66ff88")); lg.setColorAt(1, QColor("#007020"))
+        else:
+            lg.setColorAt(0, QColor("#c8c8c8")); lg.setColorAt(1, QColor("#909090"))
+        p.setBrush(QBrush(lg))
+        p.setPen(QPen(QColor("#808080"), 1.2))
+        p.drawEllipse(int(lx - lr), int(ly - lr), int(lr * 2), int(lr * 2))
+        # X del logo
+        p.setPen(QPen(QColor("#505050" if not home_active else "#00aa33"), int(lr * 0.25) + 1))
+        d = int(lr * 0.55)
+        p.drawLine(int(lx - d), int(ly - d), int(lx + d), int(ly + d))
+        p.drawLine(int(lx + d), int(ly - d), int(lx - d), int(ly + d))
+
+        # ── botones SELECT / START ─────────────────────────────────────────
+        for sid, rx, ry in [("select", 0.415, 0.415), ("start", 0.585, 0.415)]:
+            active = self._active.get(sid, False)
+            scx, scy = cx(rx), cy(ry)
+            sw, sh = sz(0.065), sz(0.038)
+            col = QColor(_CYAN if active else "#909090")
+            p.setBrush(QBrush(col))
+            p.setPen(QPen(col.darker(130), 1))
+            p.drawRoundedRect(int(scx - sw // 2), int(scy - sh // 2), sw, sh, 5, 5)
+            p.setFont(QFont("Segoe UI", max(5, sz(0.022)), QFont.Weight.Bold))
+            p.setPen(QPen(QColor("#202020" if active else "#404040")))
+            lbl = "⧉" if sid == "select" else "≡"
+            p.drawText(QRectF(scx - sw / 2, scy - sh / 2, sw, sh),
+                       Qt.AlignmentFlag.AlignCenter, lbl)
+
+        # ── stick izquierdo ────────────────────────────────────────────────
+        self._draw_stick(p, cx(0.345), cy(0.510), sz(0.080), self._ls,
+                         self._active.get("ls", False))
+
+        # ── stick derecho ──────────────────────────────────────────────────
+        self._draw_stick(p, cx(0.640), cy(0.660), sz(0.080), self._rs,
+                         self._active.get("rs", False))
+
+        # ── D-pad ─────────────────────────────────────────────────────────
+        self._draw_dpad(p, cx(0.275), cy(0.630), sz(0.052))
+
+        # ── botones cara (A B X Y) ────────────────────────────────────────
+        for sid, rx, ry, col_n, col_a, lbl in [
+            ("btn_y", 0.775, 0.40,  _COL_Y, "#ffe080", "Y"),
+            ("btn_b", 0.840, 0.515, _COL_B, "#ff8080", "B"),
+            ("btn_x", 0.710, 0.515, _COL_X, "#80b0ff", "X"),
+            ("btn_a", 0.775, 0.63,  _COL_A, "#80ff80", "A"),
+        ]:
+            active = self._active.get(sid, False)
+            fcx, fcy = cx(rx), cy(ry)
+            fr = sz(0.040)
+            c = QColor(col_a if active else col_n)
+            fg = QRadialGradient(fcx - fr * 0.3, fcy - fr * 0.4, fr * 1.5)
+            fg.setColorAt(0, c.lighter(140 if active else 130))
+            fg.setColorAt(0.5, c)
+            fg.setColorAt(1, c.darker(140))
+            p.setBrush(QBrush(fg))
+            p.setPen(QPen(c.darker(130), 1.5))
+            p.drawEllipse(int(fcx - fr), int(fcy - fr), int(fr * 2), int(fr * 2))
+            # brillo
+            if active:
+                hg = QRadialGradient(fcx - fr * 0.2, fcy - fr * 0.3, fr * 0.8)
+                hg.setColorAt(0, QColor(255, 255, 255, 120))
+                hg.setColorAt(1, QColor(255, 255, 255, 0))
+                p.setBrush(QBrush(hg)); p.setPen(Qt.PenStyle.NoPen)
+                p.drawEllipse(int(fcx - fr), int(fcy - fr), int(fr * 2), int(fr * 2))
+            p.setFont(QFont("Segoe UI", max(7, int(fr * 0.85)), QFont.Weight.Bold))
+            p.setPen(QPen(QColor(255, 255, 255, 240)))
+            p.drawText(QRectF(fcx - fr, fcy - fr, fr * 2, fr * 2),
+                       Qt.AlignmentFlag.AlignCenter, lbl)
+
+    def _body_path(self, bx, by, bw, bh) -> QPainterPath:
+        body = QPainterPath()
+        body.moveTo(bx + bw * 0.24, by)
+        body.lineTo(bx + bw * 0.76, by)
+        body.quadTo(bx + bw * 1.00, by + 0,         bx + bw, by + bh * 0.34)
+        body.lineTo(bx + bw,        by + bh * 0.52)
+        body.quadTo(bx + bw * 0.96, by + bh * 0.82, bx + bw * 0.80, by + bh)
+        body.lineTo(bx + bw * 0.60, by + bh)
+        body.quadTo(bx + bw * 0.51, by + bh * 0.78, bx + bw * 0.50, by + bh * 0.75)
+        body.quadTo(bx + bw * 0.49, by + bh * 0.78, bx + bw * 0.40, by + bh)
+        body.lineTo(bx + bw * 0.20, by + bh)
+        body.quadTo(bx + bw * 0.04, by + bh * 0.82, bx,              by + bh * 0.52)
+        body.lineTo(bx,             by + bh * 0.34)
+        body.quadTo(bx,             by + 0,          bx + bw * 0.24, by)
+        body.closeSubpath()
+        return body
+
+    def _draw_bumper(self, p, cx, cy, sz, sid, side):
+        active = self._active.get(sid, False)
+        if side == "left":
+            bcx, bcy = cx(0.205), cy(0.200)
+            bw2, bh2 = sz(0.130), sz(0.048)
+            path = QPainterPath()
+            path.moveTo(bcx + bw2 * 0.5, bcy + bh2)
+            path.quadTo(bcx - bw2 * 0.1, bcy + bh2, bcx - bw2 * 0.35, bcy + bh2 * 0.4)
+            path.quadTo(bcx - bw2 * 0.5, bcy - bh2 * 0.2, bcx + bw2 * 0.0, bcy - bh2 * 0.5)
+            path.quadTo(bcx + bw2 * 0.3, bcy - bh2 * 0.8, bcx + bw2 * 0.5, bcy)
+            path.closeSubpath()
+        else:
+            bcx, bcy = cx(0.795), cy(0.200)
+            bw2, bh2 = sz(0.130), sz(0.048)
+            path = QPainterPath()
+            path.moveTo(bcx - bw2 * 0.5, bcy + bh2)
+            path.quadTo(bcx + bw2 * 0.1, bcy + bh2, bcx + bw2 * 0.35, bcy + bh2 * 0.4)
+            path.quadTo(bcx + bw2 * 0.5, bcy - bh2 * 0.2, bcx - bw2 * 0.0, bcy - bh2 * 0.5)
+            path.quadTo(bcx - bw2 * 0.3, bcy - bh2 * 0.8, bcx - bw2 * 0.5, bcy)
+            path.closeSubpath()
+        col = QColor(_AMBER if active else "#b8b8b8")
+        p.setBrush(QBrush(col))
+        p.setPen(QPen(col.darker(130), 1.2))
+        p.drawPath(path)
+        lbl = "LB" if side == "left" else "RB"
+        p.setFont(QFont("Segoe UI", max(6, int(bh2 * 0.55)), QFont.Weight.Bold))
+        p.setPen(QPen(QColor("#303030" if not active else "#202020")))
+        if side == "left":
+            p.drawText(QRectF(bcx - bw2 * 0.2, bcy - bh2 * 0.1, bw2 * 0.7, bh2 * 0.9),
+                       Qt.AlignmentFlag.AlignCenter, lbl)
+        else:
+            p.drawText(QRectF(bcx - bw2 * 0.5, bcy - bh2 * 0.1, bw2 * 0.7, bh2 * 0.9),
+                       Qt.AlignmentFlag.AlignCenter, lbl)
+
+    def _draw_trigger(self, p, cx, cy, sz, sid, side):
+        active = self._active.get(sid, False)
+        if side == "left":
+            tcx, tcy = cx(0.185), cy(0.095)
+            tw, th = sz(0.120), sz(0.060)
+        else:
+            tcx, tcy = cx(0.815), cy(0.095)
+            tw, th = sz(0.120), sz(0.060)
+        col = QColor(_AMBER if active else "#c8c8c8")
+        path = QPainterPath()
+        if side == "left":
+            path.moveTo(tcx - tw * 0.4, tcy + th)
+            path.quadTo(tcx - tw * 0.5, tcy + th * 0.5, tcx - tw * 0.3, tcy)
+            path.quadTo(tcx, tcy - th * 0.5, tcx + tw * 0.4, tcy)
+            path.lineTo(tcx + tw * 0.4, tcy + th)
+            path.closeSubpath()
+        else:
+            path.moveTo(tcx + tw * 0.4, tcy + th)
+            path.quadTo(tcx + tw * 0.5, tcy + th * 0.5, tcx + tw * 0.3, tcy)
+            path.quadTo(tcx, tcy - th * 0.5, tcx - tw * 0.4, tcy)
+            path.lineTo(tcx - tw * 0.4, tcy + th)
+            path.closeSubpath()
+        p.setBrush(QBrush(col))
+        p.setPen(QPen(col.darker(130), 1.2))
+        p.drawPath(path)
+        lbl = "LT" if side == "left" else "RT"
+        p.setFont(QFont("Segoe UI", max(6, int(th * 0.55)), QFont.Weight.Bold))
+        p.setPen(QPen(QColor("#303030" if not active else "#202020")))
+        p.drawText(QRectF(tcx - tw * 0.3, tcy + th * 0.05, tw * 0.6, th * 0.8),
+                   Qt.AlignmentFlag.AlignCenter, lbl)
+
+    def _draw_stick(self, p, scx, scy, sr, pos: QPointF, pressed: bool):
+        # Anillo exterior (base)
+        bg = QRadialGradient(scx - sr * 0.2, scy - sr * 0.2, sr * 1.5)
+        bg.setColorAt(0, QColor("#c0c0c0"))
+        bg.setColorAt(0.5, QColor("#989898"))
+        bg.setColorAt(1, QColor("#707070"))
+        p.setBrush(QBrush(bg))
+        p.setPen(QPen(QColor("#606060"), 1.5))
+        p.drawEllipse(int(scx - sr), int(scy - sr), int(sr * 2), int(sr * 2))
+        # Cap del stick (se desplaza con pos)
+        cap_r = sr * 0.62
+        off_x = pos.x() * (sr - cap_r) * 0.7
+        off_y = pos.y() * (sr - cap_r) * 0.7
+        cx2, cy2 = scx + off_x, scy + off_y
+        col = QColor(_CYAN if pressed else "#d0d0d0")
+        cg = QRadialGradient(cx2 - cap_r * 0.3, cy2 - cap_r * 0.3, cap_r * 1.4)
+        cg.setColorAt(0, col.lighter(120))
+        cg.setColorAt(0.5, col)
+        cg.setColorAt(1, col.darker(140))
+        p.setBrush(QBrush(cg))
+        p.setPen(QPen(QColor("#404040"), 1.2))
+        p.drawEllipse(int(cx2 - cap_r), int(cy2 - cap_r), int(cap_r * 2), int(cap_r * 2))
+        # Cruz central del stick
+        p.setPen(QPen(QColor("#909090"), 1))
+        p.drawLine(int(cx2 - cap_r * 0.4), int(cy2), int(cx2 + cap_r * 0.4), int(cy2))
+        p.drawLine(int(cx2), int(cy2 - cap_r * 0.4), int(cx2), int(cy2 + cap_r * 0.4))
+
+    def _draw_dpad(self, p, dcx, dcy, arm):
+        wid = int(arm * 0.58)
+        p.setBrush(QBrush(QColor("#c0c0c0")))
+        p.setPen(QPen(QColor("#909090"), 1))
+        # centro
+        p.drawRoundedRect(int(dcx - wid // 2), int(dcy - wid // 2), wid, wid, 3, 3)
+        dirs = {
+            "dpad_up":    (0, -1), "dpad_down":  (0,  1),
+            "dpad_left":  (-1, 0), "dpad_right": ( 1, 0),
+        }
+        for sid, (dx, dy) in dirs.items():
+            active = self._active.get(sid, False)
+            col = QColor(_AMBER if active else "#c0c0c0")
+            p.setBrush(QBrush(col))
+            p.setPen(QPen(col.darker(130), 1))
+            rx = int(dcx + dx * arm - wid // 2)
+            ry = int(dcy + dy * arm - wid // 2)
+            rw = wid if dy == 0 else wid
+            rh = arm if dy != 0 else wid
+            p.drawRoundedRect(rx, ry, rw, rh, 3, 3)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  ControlZone — zona clicable superpuesta
+#  StickWidget — visualizador del stick analógico
 # ══════════════════════════════════════════════════════════════════════════════
 
-class ControlZone(QWidget):
-    assignment_changed = pyqtSignal(str, str)
+class StickWidget(QWidget):
+    """Muestra la posición del stick como punto en un círculo."""
 
-    def __init__(self, slot_id: str, label: str, actions: list,
-                 shape: str = "ellipse", color: str = "", size: int = 44,
-                 parent=None):
+    def __init__(self, label="L", parent=None):
         super().__init__(parent)
-        self.slot_id = slot_id
-        self.label   = label
-        self.actions = actions
-        self.shape   = shape
-        self._color  = color or _COL_SYS
-        self._sz     = size
-        self.action  = ""
-        self._hover  = False
-        self.setFixedSize(size, size)
-        self.setAcceptDrops(True)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setToolTip(f"{label} — clic para asignar · clic derecho = borrar")
+        self.label = label
+        self._x = 0.0
+        self._y = 0.0
+        self.setFixedSize(130, 130)
+        self.setStyleSheet("background: transparent;")
 
-    def set_action(self, action: str):
-        self.action = action
+    def set_pos(self, x: float, y: float):
+        self._x = max(-1.0, min(1.0, x))
+        self._y = max(-1.0, min(1.0, y))
         self.update()
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w, h = self.width(), self.height()
-
-        base = QColor(self._color)
-        if self.action and self.action != "---":
-            base = QColor(action_color(self.action))
-        if self._hover:
-            base = base.lighter(160)
-
-        path = QPainterPath()
-        if self.shape == "ellipse":
-            path.addEllipse(QRectF(2, 2, w - 4, h - 4))
-        elif self.shape == "pill":
-            path.addRoundedRect(QRectF(2, 2, w - 4, h - 4), 8, 8)
-        else:
-            path.addRoundedRect(QRectF(2, 2, w - 4, h - 4), 6, 6)
-
-        # sombra
-        p.save(); p.translate(2, 2)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(QColor(0, 0, 0, 100)))
-        p.drawPath(path); p.restore()
-
-        grad = QRadialGradient(w * 0.35, h * 0.30, max(w, h) * 0.8)
-        grad.setColorAt(0, base.lighter(130))
-        grad.setColorAt(1, base)
-        p.setBrush(QBrush(grad))
-        border = QColor(_AMBER) if self._hover else base.lighter(170)
-        p.setPen(QPen(border, 1.8 if self._hover else 1.2))
-        p.drawPath(path)
-
-        # brillo
-        hi = QPainterPath()
-        hi.addEllipse(QRectF(w * 0.2, h * 0.1, w * 0.45, h * 0.28))
-        hi_g = QLinearGradient(0, h * 0.1, 0, h * 0.4)
-        hi_g.setColorAt(0, QColor(255, 255, 255, 60))
-        hi_g.setColorAt(1, QColor(255, 255, 255, 0))
-        p.setBrush(QBrush(hi_g)); p.setPen(Qt.PenStyle.NoPen)
-        p.drawPath(hi)
-
-        # etiqueta fija (letra del slot)
-        p.setFont(QFont("Segoe UI", max(7, self._sz // 6), QFont.Weight.Bold))
-        p.setPen(QPen(QColor(255, 255, 255, 220)))
-        p.drawText(QRect(0, 0, w, h - 2),
-                   Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter, self.label)
-
-        # accion asignada
-        if self.action and self.action != "---":
-            short = self.action.split("--")[0].strip() if "--" in self.action else self.action
-            short = short[:8]
-            p.setFont(QFont("Consolas", max(5, self._sz // 9), QFont.Weight.Bold))
-            p.setPen(QPen(QColor(255, 255, 255, 240)))
-            p.drawText(QRect(1, 2, w - 2, h - 12), Qt.AlignmentFlag.AlignCenter, short)
-        else:
-            p.setBrush(QBrush(QColor(255, 255, 255, 40)))
-            p.setPen(Qt.PenStyle.NoPen)
-            r = max(3, self._sz // 10)
-            p.drawEllipse(w // 2 - r, h // 2 - r - 3, r * 2, r * 2)
-
-    def enterEvent(self, e):  self._hover = True;  self.update()
-    def leaveEvent(self, e):  self._hover = False; self.update()
-
-    def _pick(self):
-        dlg = ActionPickerDialog(self.actions, self.action, self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            act = dlg.selected_action()
-            if act:
-                self.set_action(act)
-                self.assignment_changed.emit(self.slot_id, act)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._pick()
-
-    def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._pick()
-
-    def contextMenuEvent(self, event):
-        self.set_action("")
-        self.assignment_changed.emit(self.slot_id, "")
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasText():
-            self._hover = True; self.update()
-            event.acceptProposedAction()
-
-    def dragLeaveEvent(self, event):
-        self._hover = False; self.update()
-
-    def dropEvent(self, event):
-        self._hover = False
-        act = event.mimeData().text()
-        self.set_action(act)
-        self.assignment_changed.emit(self.slot_id, act)
-        event.acceptProposedAction()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  GamepadCanvas — mando Xbox dibujado en QPainter
-# ══════════════════════════════════════════════════════════════════════════════
-
-class GamepadCanvas(QWidget):
-    """Dibuja el mando Xbox sin widgets encima — solo la imagen."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setMinimumSize(480, 340)
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        self._draw(p, self.width(), self.height())
-
-    def _draw(self, p: QPainter, W: int, H: int):
-        px = int(W * 0.04); py = int(H * 0.05)
-        ew = W - px * 2;    eh = H - py * 2
-
-        def cx(r): return int(px + r * ew)
-        def cy(r): return int(py + r * eh)
-        def sz(r): return int(min(ew, eh) * r)
-
-        bx, by = cx(0.06), cy(0.12)
-        bw = cx(0.94) - bx
-        bh = cy(0.90) - by
-
-        # ── cuerpo ──
-        body = QPainterPath()
-        body.moveTo(bx + bw * 0.24, by)
-        body.lineTo(bx + bw * 0.76, by)
-        body.quadTo(bx + bw, by, bx + bw, by + bh * 0.36)
-        body.lineTo(bx + bw, by + bh * 0.54)
-        body.quadTo(bx + bw * 0.95, by + bh * 0.84, bx + bw * 0.78, by + bh)
-        body.lineTo(bx + bw * 0.58, by + bh)
-        body.quadTo(bx + bw * 0.50, by + bh * 0.77, bx + bw * 0.50, by + bh * 0.74)
-        body.quadTo(bx + bw * 0.50, by + bh * 0.77, bx + bw * 0.42, by + bh)
-        body.lineTo(bx + bw * 0.22, by + bh)
-        body.quadTo(bx + bw * 0.05, by + bh * 0.84, bx, by + bh * 0.54)
-        body.lineTo(bx, by + bh * 0.36)
-        body.quadTo(bx, by, bx + bw * 0.24, by)
-        body.closeSubpath()
-
-        p.save(); p.translate(4, 5)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(QColor(0, 0, 0, 90)))
-        p.drawPath(body); p.restore()
-
-        bg = QLinearGradient(0, by, 0, by + bh)
-        bg.setColorAt(0.0, QColor("#303030"))
-        bg.setColorAt(0.5, QColor("#1c1c1c"))
-        bg.setColorAt(1.0, QColor("#101010"))
-        p.setBrush(QBrush(bg))
-        p.setPen(QPen(QColor("#484848"), 1.5))
-        p.drawPath(body)
-
-        # brillo superior
-        hi = QPainterPath()
-        hi.moveTo(bx + bw * 0.28, by + 2)
-        hi.quadTo(bx + bw * 0.5, by - 5, bx + bw * 0.72, by + 2)
-        hi.quadTo(bx + bw * 0.5, by + bh * 0.14, bx + bw * 0.28, by + 2)
-        hi_g = QLinearGradient(0, by, 0, by + bh * 0.14)
-        hi_g.setColorAt(0, QColor(255, 255, 255, 30))
-        hi_g.setColorAt(1, QColor(255, 255, 255, 0))
-        p.setBrush(QBrush(hi_g)); p.setPen(Qt.PenStyle.NoPen)
-        p.drawPath(hi)
-
-        # zona central
-        mid_cx, mid_cy = cx(0.5), cy(0.38)
-        mid_w, mid_h   = sz(0.26), sz(0.20)
-        mid_p = QPainterPath()
-        mid_p.addRoundedRect(
-            QRectF(mid_cx - mid_w / 2, mid_cy - mid_h / 2, mid_w, mid_h), 10, 10)
-        p.setBrush(QBrush(QColor("#262626")))
-        p.setPen(QPen(QColor("#363636"), 1))
-        p.drawPath(mid_p)
-
-        # LED verde
-        led_r = sz(0.033)
-        lx, ly = cx(0.5), cy(0.26)
-        lg = QRadialGradient(lx - led_r * 0.3, ly - led_r * 0.3, led_r * 1.5)
-        lg.setColorAt(0, QColor("#55ff75"))
-        lg.setColorAt(0.5, QColor("#10b030"))
-        lg.setColorAt(1, QColor("#004010"))
-        p.setBrush(QBrush(lg))
-        p.setPen(QPen(QColor("#007020"), 1))
-        p.drawEllipse(lx - led_r, ly - led_r, led_r * 2, led_r * 2)
-
-        # sticks
-        for rx, ry in [(0.35, 0.52), (0.65, 0.68)]:
-            scx, scy = cx(rx), cy(ry)
-            sr = sz(0.068)
-            sg = QRadialGradient(scx - sr * 0.3, scy - sr * 0.3, sr * 1.6)
-            sg.setColorAt(0, QColor("#505050"))
-            sg.setColorAt(0.6, QColor("#262626"))
-            sg.setColorAt(1, QColor("#141414"))
-            p.setBrush(QBrush(sg))
-            p.setPen(QPen(QColor("#606060"), 1.5))
-            p.drawEllipse(scx - sr, scy - sr, sr * 2, sr * 2)
-            p.setPen(QPen(QColor("#363636"), 1))
-            p.drawLine(int(scx), int(scy - sr + 5), int(scx), int(scy + sr - 5))
-            p.drawLine(int(scx - sr + 5), int(scy), int(scx + sr - 5), int(scy))
-
-        # D-Pad
-        dp_cx, dp_cy = cx(0.28), cy(0.71)
-        dp_arm = sz(0.044)
-        dp_wid = int(dp_arm * 0.62)
-        p.setBrush(QBrush(QColor("#2c2c2c")))
-        p.setPen(QPen(QColor("#484848"), 1))
-        for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
-            r = QRect(
-                dp_cx + dx * dp_arm - dp_wid // 2,
-                dp_cy + dy * dp_arm - dp_wid // 2,
-                dp_wid, dp_arm)
-            p.drawRoundedRect(r, 2, 2)
-
-        # bumpers
-        for rx, sign in [(0.20, -1), (0.80, 1)]:
-            bcx, bcy = cx(rx), cy(0.20)
-            bw2, bh2 = sz(0.12), sz(0.048)
-            bp = QPainterPath()
-            if sign == -1:
-                bp.moveTo(bcx, bcy + bh2 // 2)
-                bp.quadTo(bcx - bw2 * 0.3, bcy - bh2,
-                          bcx + bw2 * 0.6, bcy - bh2 // 2)
-                bp.lineTo(bcx + bw2 * 0.6, bcy + bh2 // 2)
-                bp.closeSubpath()
-            else:
-                bp.moveTo(bcx, bcy + bh2 // 2)
-                bp.quadTo(bcx + bw2 * 0.3, bcy - bh2,
-                          bcx - bw2 * 0.6, bcy - bh2 // 2)
-                bp.lineTo(bcx - bw2 * 0.6, bcy + bh2 // 2)
-                bp.closeSubpath()
-            p.setBrush(QBrush(QColor("#2a2a38")))
-            p.setPen(QPen(QColor("#3e3e50"), 1))
-            p.drawPath(bp)
-
-        # botones cara
-        face = [
-            (0.78, 0.42, _COL_Y, "Y"),
-            (0.71, 0.54, _COL_X, "X"),
-            (0.85, 0.54, _COL_B, "B"),
-            (0.78, 0.66, _COL_A, "A"),
-        ]
-        for rx, ry, col, lbl in face:
-            fcx, fcy = cx(rx), cy(ry)
-            fr = sz(0.036)
-            fg = QRadialGradient(fcx - fr * 0.3, fcy - fr * 0.4, fr * 1.6)
-            c = QColor(col)
-            fg.setColorAt(0, c.lighter(150))
-            fg.setColorAt(0.6, c)
-            fg.setColorAt(1, c.darker(150))
-            p.setBrush(QBrush(fg))
-            p.setPen(QPen(c.darker(130), 1.2))
-            p.drawEllipse(int(fcx - fr), int(fcy - fr), int(fr * 2), int(fr * 2))
-            p.setFont(QFont("Segoe UI", max(6, int(fr * 0.9)), QFont.Weight.Bold))
-            p.setPen(QPen(QColor(255, 255, 255, 230)))
-            p.drawText(QRect(int(fcx - fr), int(fcy - fr), int(fr * 2), int(fr * 2)),
-                       Qt.AlignmentFlag.AlignCenter, lbl)
-
-        # SELECT / START (rectangulos pequeños)
-        for rx, lbl in [(0.42, "SEL"), (0.58, "STA")]:
-            scx2, scy2 = cx(rx), cy(0.42)
-            sw, sh2 = sz(0.06), sz(0.04)
-            p.setBrush(QBrush(QColor("#1e1e2e")))
-            p.setPen(QPen(QColor("#383850"), 1))
-            p.drawRoundedRect(int(scx2 - sw // 2), int(scy2 - sh2 // 2), sw, sh2, 4, 4)
-            p.setFont(QFont("Consolas", max(5, sz(0.022)), QFont.Weight.Bold))
-            p.setPen(QPen(QColor(_TXT_GH)))
-            p.drawText(QRect(int(scx2 - sw // 2), int(scy2 - sh2 // 2), sw, sh2),
-                       Qt.AlignmentFlag.AlignCenter, lbl)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  GamepadWidget — canvas + ControlZones superpuestas
-# ══════════════════════════════════════════════════════════════════════════════
-
-class GamepadWidget(QWidget):
-    slot_changed = pyqtSignal(str, str)
-
-    _ZONE_DEFS = [
-        # (cx_rel, cy_rel, sid, label, shape, color, sz_rel)
-        (0.17, 0.08, "lt",         "LT",  "pill",    _COL_TRIG,  0.088),
-        (0.83, 0.08, "rt",         "RT",  "pill",    _COL_TRIG,  0.088),
-        (0.20, 0.20, "lb",         "LB",  "pill",    _COL_BUMP,  0.080),
-        (0.80, 0.20, "rb",         "RB",  "pill",    _COL_BUMP,  0.080),
-        (0.78, 0.42, "btn_y",      "Y",   "ellipse", _COL_Y,     0.070),
-        (0.71, 0.54, "btn_x",      "X",   "ellipse", _COL_X,     0.070),
-        (0.85, 0.54, "btn_b",      "B",   "ellipse", _COL_B,     0.070),
-        (0.78, 0.66, "btn_a",      "A",   "ellipse", _COL_A,     0.070),
-        (0.28, 0.61, "dpad_up",    "U",   "rect",    _COL_DPAD,  0.055),
-        (0.28, 0.80, "dpad_down",  "D",   "rect",    _COL_DPAD,  0.055),
-        (0.19, 0.70, "dpad_left",  "L",   "rect",    _COL_DPAD,  0.055),
-        (0.37, 0.70, "dpad_right", "R",   "rect",    _COL_DPAD,  0.055),
-        (0.35, 0.52, "ls",         "LS",  "ellipse", _COL_STICK, 0.100),
-        (0.65, 0.68, "rs",         "RS",  "ellipse", _COL_STICK, 0.100),
-        (0.42, 0.42, "select",     "SEL", "rect",    _COL_SYS,   0.065),
-        (0.58, 0.42, "start",      "STA", "rect",    _COL_SYS,   0.065),
-        (0.50, 0.35, "home",       "X",   "ellipse", "#1a3a1a",  0.068),
-    ]
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.assignments: dict = {}
-        self._zones: dict = {}
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setMinimumSize(480, 340)
-
-        # Canvas de fondo (no intercepta eventos)
-        self._canvas = GamepadCanvas(self)
-        self._canvas.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self._zones_built = False
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._canvas.setGeometry(0, 0, self.width(), self.height())
-        self._reposition()
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        if not self._zones_built:
-            self._build_zones()
-        QTimer.singleShot(30, self._reposition)
-
-    def _build_zones(self):
-        self._zones_built = True
-        ref = min(self.width(), self.height())
-        for (cx_r, cy_r, sid, lbl, shape, col, sz_r) in self._ZONE_DEFS:
-            sz = max(34, int(ref * sz_r * 1.1))
-            z = ControlZone(sid, lbl, GAMEPAD_ACTIONS, shape, col, sz, self)
-            z.assignment_changed.connect(self._on_zone)
-            self._zones[sid] = z
-            z.show()
-        self._reposition()
-
-    def _reposition(self):
         W, H = self.width(), self.height()
-        if W == 0 or H == 0:
-            return
-        px = int(W * 0.04); py = int(H * 0.05)
-        ew = W - px * 2;    eh = H - py * 2
-        ref = min(W, H)
-        for (cx_r, cy_r, sid, lbl, shape, col, sz_r) in self._ZONE_DEFS:
-            z = self._zones.get(sid)
-            if not z:
-                continue
-            sz = max(34, int(ref * sz_r * 1.1))
-            z.setFixedSize(sz, sz)
-            x = int(px + cx_r * ew) - sz // 2
-            y = int(py + cy_r * eh) - sz // 2
-            z.move(x, y)
+        cx, cy = W // 2, H // 2
+        r = min(W, H) // 2 - 12
 
-    def _on_zone(self, sid, action):
-        self.assignments[sid] = action
-        self.slot_changed.emit(sid, action)
-
-    def get_assignments(self): return dict(self.assignments)
-    def set_assignments(self, data):
-        self.assignments = dict(data)
-        for sid, z in self._zones.items(): z.set_action(data.get(sid, ""))
-    def clear_all(self):
-        self.assignments = {}
-        for z in self._zones.values(): z.set_action("")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  GamepadLayout (wrapper)
-# ══════════════════════════════════════════════════════════════════════════════
-
-class GamepadLayout(QWidget):
-    slot_changed = pyqtSignal(str, str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.assignments: dict = {}
-        self._slots:      dict = {}
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(4)
-        hint = QLabel("  Clic en cada control para asignar · arrastra accion desde la paleta · clic derecho = borrar")
-        hint.setStyleSheet(f"font-size:11px;color:{_TXT_GH};background:transparent;font-family:{_MONO};")
-        lay.addWidget(hint)
-        self._gw = GamepadWidget()
-        self._gw.slot_changed.connect(self._relay)
-        lay.addWidget(self._gw, 1)
-        self._slots = self._gw._zones
-
-    def _relay(self, sid, action):
-        self.assignments[sid] = action
-        self._slots = self._gw._zones
-        self.slot_changed.emit(sid, action)
-
-    def set_theme(self, theme: str): pass
-    def get_assignments(self): return self._gw.get_assignments()
-    def set_assignments(self, data):
-        self._gw.set_assignments(data)
-        self.assignments = dict(data)
-    def clear_all(self):
-        self._gw.clear_all()
-        self.assignments = {}
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  ArcadeStickDrawing — joystick arcade dibujado
-# ══════════════════════════════════════════════════════════════════════════════
-
-class ArcadeStickDrawing(QWidget):
-    def __init__(self, accent: str = _AMBER, gate: str = "octagonal", parent=None):
-        super().__init__(parent)
-        self.accent_color = QColor(accent)
-        self.gate = gate
-        self.setMinimumSize(80, 100)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-    def set_accent(self, color: str): self.accent_color = QColor(color); self.update()
-    def set_gate(self, gate: str):    self.gate = gate;                   self.update()
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        W, H = self.width(), self.height()
-        s  = min(W, H)
-        cx = W // 2
-        cy = H // 2 + int(s * 0.08)
-
-        base_r  = int(s * 0.36)
-        shaft_w = max(6, int(s * 0.10))
-        shaft_h = int(s * 0.34)
-        ball_r  = max(10, int(s * 0.16))
-        gate_s  = int(base_r * 0.68)
-
-        # gate
-        p.setPen(QPen(QColor("#2a2a2a"), 1.5))
-        p.setBrush(QBrush(QColor("#0e0e0e")))
-        if self.gate == "octagonal":
-            hg = gate_s // 2
-            pts = [
-                QPoint(cx - hg, cy - gate_s), QPoint(cx + hg, cy - gate_s),
-                QPoint(cx + gate_s, cy - hg), QPoint(cx + gate_s, cy + hg),
-                QPoint(cx + hg, cy + gate_s), QPoint(cx - hg, cy + gate_s),
-                QPoint(cx - gate_s, cy + hg), QPoint(cx - gate_s, cy - hg),
-            ]
-            p.drawPolygon(QPolygon(pts))
-        elif self.gate == "square":
-            p.drawRect(cx - gate_s, cy - gate_s, gate_s * 2, gate_s * 2)
-        else:
-            p.drawEllipse(cx - gate_s, cy - gate_s, gate_s * 2, gate_s * 2)
-
-        # base
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(QColor(0, 0, 0, 80)))
-        p.drawEllipse(cx - base_r + 3, cy - base_r + 3, base_r * 2, base_r * 2)
-        bg = QRadialGradient(cx - base_r // 4, cy - base_r // 4, base_r * 1.4)
-        bg.setColorAt(0, QColor("#505050"))
-        bg.setColorAt(0.5, QColor("#2c2c2c"))
-        bg.setColorAt(1, QColor("#141414"))
+        # fondo
+        bg = QRadialGradient(cx, cy, r)
+        bg.setColorAt(0, QColor("#1a1e2a"))
+        bg.setColorAt(1, QColor("#0d1018"))
         p.setBrush(QBrush(bg))
-        p.setPen(QPen(QColor("#606060"), 1.5))
-        p.drawEllipse(cx - base_r, cy - base_r, base_r * 2, base_r * 2)
-        p.setPen(QPen(QColor("#0a0a0a"), 1))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawEllipse(cx - base_r + 6, cy - base_r + 6, (base_r - 6) * 2, (base_r - 6) * 2)
+        p.setPen(QPen(QColor(_BORDER), 1.5))
+        p.drawEllipse(cx - r, cy - r, r * 2, r * 2)
 
-        # shaft
-        sx = cx - shaft_w // 2
-        shaft_top = cy - shaft_h
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(QColor(0, 0, 0, 90)))
-        p.drawRoundedRect(sx + 3, shaft_top + 3, shaft_w, shaft_h, shaft_w // 2, shaft_w // 2)
-        sg = QLinearGradient(sx, 0, sx + shaft_w, 0)
-        sg.setColorAt(0, QColor("#585858")); sg.setColorAt(0.35, QColor("#c8c8c8"))
-        sg.setColorAt(0.65, QColor("#888888")); sg.setColorAt(1, QColor("#303030"))
-        p.setBrush(QBrush(sg))
-        p.setPen(QPen(QColor("#1e1e1e"), 1))
-        p.drawRoundedRect(sx, shaft_top, shaft_w, shaft_h, shaft_w // 2, shaft_w // 2)
+        # cuadrícula
+        p.setPen(QPen(QColor(_MID), 1))
+        p.drawLine(cx - r, cy, cx + r, cy)
+        p.drawLine(cx, cy - r, cx, cy + r)
+        p.drawEllipse(cx - r // 2, cy - r // 2, r, r)
 
-        # ball
-        ball_cx, ball_cy = cx, shaft_top + ball_r // 2
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(QColor(0, 0, 0, 90)))
-        p.drawEllipse(ball_cx - ball_r + 2, ball_cy - ball_r + 2, ball_r * 2, ball_r * 2)
-        acc = self.accent_color
-        bg2 = QRadialGradient(ball_cx - ball_r // 3, ball_cy - ball_r // 3, ball_r * 1.5)
-        bg2.setColorAt(0, acc.lighter(190)); bg2.setColorAt(0.4, acc); bg2.setColorAt(1, acc.darker(170))
-        p.setBrush(QBrush(bg2))
-        p.setPen(QPen(acc.darker(140), 1.5))
-        p.drawEllipse(ball_cx - ball_r, ball_cy - ball_r, ball_r * 2, ball_r * 2)
-        hi_r = max(3, ball_r // 3)
-        hi_x, hi_y = ball_cx - ball_r // 3, ball_cy - ball_r // 3
-        hg2 = QRadialGradient(hi_x, hi_y, hi_r * 2)
-        hg2.setColorAt(0, QColor(255, 255, 255, 210)); hg2.setColorAt(1, QColor(255, 255, 255, 0))
-        p.setBrush(QBrush(hg2)); p.setPen(Qt.PenStyle.NoPen)
-        p.drawEllipse(hi_x - hi_r, hi_y - hi_r, hi_r * 2, hi_r * 2)
+        # punto del stick
+        dot_r = 10
+        dot_x = cx + int(self._x * (r - dot_r))
+        dot_y = cy + int(self._y * (r - dot_r))
+        dg = QRadialGradient(dot_x - dot_r // 3, dot_y - dot_r // 3, dot_r * 1.5)
+        dg.setColorAt(0, QColor(_CYAN).lighter(130))
+        dg.setColorAt(1, QColor(_CYAN).darker(150))
+        p.setBrush(QBrush(dg))
+        p.setPen(QPen(QColor(_CYAN).darker(120), 1.5))
+        p.drawEllipse(dot_x - dot_r, dot_y - dot_r, dot_r * 2, dot_r * 2)
 
-        # gate label
-        gl = {"octagonal": "OCT", "square": "SQR", "circular": "CIR"}.get(self.gate, "")
-        p.setFont(QFont("Consolas", max(6, s // 16)))
+        # etiqueta
+        p.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        p.setPen(QPen(QColor(_TXT_LO)))
+        p.drawText(QRectF(0, H - 18, W, 18), Qt.AlignmentFlag.AlignCenter,
+                   f"{self.label}  ({self._x:+.2f}, {self._y:+.2f})")
+        p.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         p.setPen(QPen(QColor(_TXT_GH)))
-        p.drawText(QRect(cx - 25, cy + base_r - 14, 50, 14), Qt.AlignmentFlag.AlignCenter, gl)
+        p.drawText(QRectF(cx - r, cy - r - 16, r * 2, 16),
+                   Qt.AlignmentFlag.AlignCenter, f"Stick {self.label}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  ArcadeWidget — panel arcade con stick + botonera
+#  InputBridge — hilo que lee eventos pygame y emite señales Qt
 # ══════════════════════════════════════════════════════════════════════════════
 
-class ArcadeWidget(QWidget):
-    slot_changed = pyqtSignal(str, str)
+class InputBridge(QObject):
+    button_event = pyqtSignal(int, str, bool)   # joystick_id, btn_name, pressed
+    axis_event   = pyqtSignal(int, str, float, float)  # jid, "left"/"right", x, y
+    devices_changed = pyqtSignal(list)           # lista de nombres
 
-    def __init__(self, btn_mode: int = 8, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self._btn_mode = btn_mode
-        self.assignments: dict = {}
-        self._zones: dict = {}
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setMinimumSize(600, 280)
-        self._build()
-
-    def _build(self):
-        for z in list(self._zones.values()):
-            z.setParent(None); z.deleteLater()
-        self._zones = {}
-
-        old = self.layout()
-        if old:
-            while old.count():
-                item = old.takeAt(0)
-                if item.widget(): item.widget().setParent(None)
-            QWidget().setLayout(old)
-
-        root = QHBoxLayout(self)
-        root.setContentsMargins(20, 16, 20, 16)
-        root.setSpacing(16)
-
-        root.addLayout(self._build_player("p1", _AMBER), 5)
-        root.addWidget(self._build_center(), 2)
-        root.addLayout(self._build_player("p2", _CYAN), 5)
-
-    def _build_player(self, player: str, accent: str) -> QVBoxLayout:
-        lay = QVBoxLayout()
-        lay.setSpacing(6)
-
-        hdr = QHBoxLayout()
-        dot = QLabel("●")
-        dot.setStyleSheet(f"color:{accent};font-size:10px;background:transparent;")
-        name = QLabel(f"PLAYER {'1' if player == 'p1' else '2'}")
-        name.setStyleSheet(
-            f"color:{accent};font-size:13px;font-weight:800;"
-            f"letter-spacing:2px;font-family:{_MONO};background:transparent;")
-        hdr.addWidget(dot); hdr.addWidget(name); hdr.addStretch()
-        lay.addLayout(hdr)
-
-        inner = QHBoxLayout()
-        inner.setSpacing(12)
-
-        # Columna stick
-        sc = QVBoxLayout(); sc.setSpacing(4)
-
-        lbl_s = QLabel("PALANCA")
-        lbl_s.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_s.setStyleSheet(
-            f"font-size:10px;font-weight:800;letter-spacing:1px;"
-            f"color:{_TXT_LO};font-family:{_MONO};background:transparent;")
-
-        stick = ArcadeStickDrawing(accent=accent)
-        stick.setObjectName(f"stick_{player}")
-        stick.setMinimumSize(80, 100)
-        stick.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-        gate_cmb = QComboBox()
-        gate_cmb.addItems(["Octagonal", "Cuadrado", "Circular"])
-        gate_cmb.setFixedHeight(24)
-        gate_cmb.setStyleSheet(
-            f"QComboBox{{background:{_RAISED};border:1px solid {_BORDER};"
-            f"border-radius:4px;color:{_TXT_MD};font-size:10px;padding:1px 6px;}}"
-            f"QComboBox::drop-down{{border:none;width:14px;}}")
-        gmap = {0: "octagonal", 1: "square", 2: "circular"}
-        gate_cmb.currentIndexChanged.connect(lambda i, s=stick: s.set_gate(gmap[i]))
-
-        dirs = QHBoxLayout(); dirs.setSpacing(2)
-        dirs.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        for sid, arrow in [(f"{player}_up", "UP"), (f"{player}_dn", "DN"),
-                           (f"{player}_lt", "LT"), (f"{player}_rt", "RT")]:
-            z = ControlZone(sid, arrow, ARCADE_ACTIONS, "rect", _COL_DPAD, 32)
-            z.assignment_changed.connect(self._on_zone)
-            self._zones[sid] = z; z.setParent(self); z.show()
-            dirs.addWidget(z)
-
-        sc.addWidget(lbl_s); sc.addWidget(stick, 1)
-        sc.addWidget(gate_cmb); sc.addLayout(dirs)
-        inner.addLayout(sc, 3)
-
-        # Columna botonera
-        bc = QVBoxLayout(); bc.setSpacing(4)
-        lbl_b = QLabel("BOTONERA")
-        lbl_b.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_b.setStyleSheet(
-            f"font-size:10px;font-weight:800;letter-spacing:1px;"
-            f"color:{_TXT_LO};font-family:{_MONO};background:transparent;")
-        bc.addWidget(lbl_b)
-
-        gw = QWidget(); gw.setStyleSheet("background:transparent;")
-        gw.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        grid = QGridLayout(gw)
-        grid.setSpacing(8); grid.setContentsMargins(0, 0, 0, 0)
-
-        colors6 = ["#c62828","#283593","#006064","#c47800","#880e4f","#1b5e20"]
-        colors8 = ["#c62828","#283593","#006064","#37474f",
-                   "#c47800","#880e4f","#1b5e20","#4e342e"]
-
-        if self._btn_mode == 6:
-            pos = [(0,0),(0,1),(0,2),(1,0),(1,1),(1,2)]
-            cols = colors6
-        else:
-            pos = [(0,0),(0,1),(0,2),(0,3),(1,0),(1,1),(1,2),(1,3)]
-            cols = colors8
-
-        for idx, (row, col) in enumerate(pos):
-            num = idx + 1
-            sid = f"{player}_b{num}"
-            z = ControlZone(sid, f"B{num}", ARCADE_ACTIONS, "ellipse",
-                            cols[idx] if idx < len(cols) else "#333344", 48)
-            z.assignment_changed.connect(self._on_zone)
-            self._zones[sid] = z; z.setParent(self); z.show()
-            grid.addWidget(z, row, col, Qt.AlignmentFlag.AlignCenter)
-
-        bc.addWidget(gw, 1)
-        inner.addLayout(bc, 5)
-        lay.addLayout(inner, 1)
-        return lay
-
-    def _build_center(self) -> QWidget:
-        w = QWidget()
-        w.setStyleSheet(
-            f"QWidget{{background:#0a0c10;border:1px solid {_BORDER};border-radius:12px;}}")
-        w.setMaximumWidth(150)
-        lay = QVBoxLayout(w)
-        lay.setContentsMargins(8, 12, 8, 12)
-        lay.setSpacing(8)
-        lay.addStretch()
-
-        lbl = QLabel("CONTROLES")
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setStyleSheet(
-            f"font-size:9px;font-weight:800;letter-spacing:2px;"
-            f"color:{_TXT_GH};font-family:{_MONO};background:transparent;border:none;")
-        lay.addWidget(lbl)
-
-        for sid, txt, col in [
-            ("p1_coin",  "1P COIN",  _COL_SYS),
-            ("p1_start", "1P START", _COL_SYS),
-            ("pause",    "PAUSE",    "#105010"),
-            ("exit",     "EXIT",     "#7a1010"),
-            ("p2_coin",  "2P COIN",  _COL_SYS),
-            ("p2_start", "2P START", _COL_SYS),
-        ]:
-            z = ControlZone(sid, txt, ARCADE_ACTIONS, "rect", col, 38)
-            z.assignment_changed.connect(self._on_zone)
-            self._zones[sid] = z; z.setParent(self); z.show()
-            lay.addWidget(z, 0, Qt.AlignmentFlag.AlignHCenter)
-
-        lay.addStretch()
-        return w
-
-    def set_btn_mode(self, mode: int):
-        if mode == self._btn_mode: return
-        old = dict(self.assignments)
-        self._btn_mode = mode
-        self._build()
-        for sid, act in old.items():
-            if sid in self._zones:
-                self._zones[sid].set_action(act)
-                self.assignments[sid] = act
-
-    def _on_zone(self, sid, action):
-        self.assignments[sid] = action
-        self.slot_changed.emit(sid, action)
-
-    def get_assignments(self): return dict(self.assignments)
-    def set_assignments(self, data):
-        self.assignments = dict(data)
-        for sid, z in self._zones.items(): z.set_action(data.get(sid, ""))
-    def clear_all(self):
-        self.assignments = {}
-        for z in self._zones.values(): z.set_action("")
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        W, H = self.width(), self.height()
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(1, 1, W - 2, H - 2), 16, 16)
-        grad = QLinearGradient(0, 0, 0, H)
-        grad.setColorAt(0.0, QColor("#1a1208"))
-        grad.setColorAt(0.5, QColor("#120d06"))
-        grad.setColorAt(1.0, QColor("#0c0806"))
-        p.setBrush(QBrush(grad))
-        p.setPen(QPen(QColor("#2a1e0a"), 2))
-        p.drawPath(path)
-        p.setPen(QPen(QColor(80, 50, 10, 18), 1))
-        for y in range(0, H, 12):
-            p.drawLine(0, y, W, y + 4)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  ArcadeLayout (wrapper)
-# ══════════════════════════════════════════════════════════════════════════════
-
-class ArcadeLayout(QWidget):
-    slot_changed = pyqtSignal(str, str)
-    MODE_6BTN = 6
-    MODE_8BTN = 8
-
-    def __init__(self, btn_mode: int = 8, parent=None):
-        super().__init__(parent)
-        self.assignments: dict = {}
-        self._btn_mode = btn_mode
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        hint = QLabel("  Clic en cada control para asignar · arrastra accion desde la paleta · clic derecho = borrar")
-        hint.setStyleSheet(f"font-size:11px;color:{_TXT_GH};background:transparent;font-family:{_MONO};")
-        lay.addWidget(hint)
-        self._aw = ArcadeWidget(btn_mode)
-        self._aw.slot_changed.connect(self._relay)
-        lay.addWidget(self._aw, 1)
-
-    def _relay(self, sid, action):
-        self.assignments[sid] = action
-        self.slot_changed.emit(sid, action)
-
-    def set_btn_mode(self, mode: int):
-        self._btn_mode = mode
-        self._aw.set_btn_mode(mode)
-
-    def get_assignments(self): return self._aw.get_assignments()
-    def set_assignments(self, data):
-        self._aw.set_assignments(data); self.assignments = dict(data)
-    def clear_all(self):
-        self._aw.clear_all(); self.assignments = {}
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  DraggableActionItem + ActionPalette
-# ══════════════════════════════════════════════════════════════════════════════
-
-class DraggableActionItem(QWidget):
-    def __init__(self, action: str, parent=None):
-        super().__init__(parent)
-        self.action = action
-        self.setFixedHeight(32)
-        self.setCursor(Qt.CursorShape.OpenHandCursor)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(8, 3, 8, 3)
-        lay.setSpacing(8)
-        dot = QLabel("●")
-        dot.setFixedWidth(10)
-        dot.setStyleSheet(f"font-size:8px;color:{action_color(action)};background:transparent;")
-        lbl = QLabel(action)
-        lbl.setStyleSheet(f"font-size:13px;color:{_TXT_HI};background:transparent;")
-        lay.addWidget(dot); lay.addWidget(lbl); lay.addStretch()
-
-    def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.MouseButton.LeftButton:
-            drag = QDrag(self)
-            mime = QMimeData()
-            mime.setText(self.action)
-            drag.setMimeData(mime)
-            pix = QPixmap(200, 32)
-            pix.fill(QColor(0, 0, 0, 0))
-            painter = QPainter(pix)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            c = QColor(action_color(self.action))
-            painter.setBrush(QBrush(c))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(0, 0, 200, 32, 6, 6)
-            painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-            painter.setPen(QPen(QColor("#ffffff")))
-            painter.drawText(QRect(0, 0, 200, 32), Qt.AlignmentFlag.AlignCenter, self.action[:24])
-            painter.end()
-            drag.setPixmap(pix)
-            drag.setHotSpot(event.pos())
-            drag.exec(Qt.DropAction.CopyAction)
-
-
-class ActionPalette(QWidget):
-    def __init__(self, actions: list, parent=None):
-        super().__init__(parent)
-        self.setFixedWidth(195)
-        self._build(actions)
-
-    def _build(self, actions: list):
-        old = self.layout()
-        if old:
-            while old.count():
-                item = old.takeAt(0)
-                if item.widget(): item.widget().deleteLater()
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-
-        hdr = QWidget(); hdr.setFixedHeight(36)
-        hdr.setStyleSheet(f"background:{_DEEP};border-bottom:1px solid {_BORDER};")
-        hl = QHBoxLayout(hdr); hl.setContentsMargins(12, 0, 12, 0)
-        lbl = QLabel("ACCIONES  (arrastra)")
-        lbl.setStyleSheet(
-            f"font-size:10px;font-weight:800;letter-spacing:1px;"
-            f"color:{_TXT_MD};font-family:{_MONO};background:transparent;")
-        hl.addWidget(lbl)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet(f"background:{_CARD};")
-
-        content = QWidget(); content.setStyleSheet(f"background:{_CARD};")
-        cl = QVBoxLayout(content)
-        cl.setContentsMargins(4, 6, 4, 6); cl.setSpacing(1)
-        for action in actions:
-            cl.addWidget(DraggableActionItem(action))
-        cl.addStretch()
-        scroll.setWidget(content)
-        lay.addWidget(hdr); lay.addWidget(scroll, 1)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  ControlsTab
-# ══════════════════════════════════════════════════════════════════════════════
-
-class ControlsTab(TabModule):
-    tab_title = "Controles"
-    tab_icon  = ""
-
-    def __init__(self, parent):
-        super().__init__(parent)
-        self._config:          dict         = {}
-        self._systems:         list         = []
-        self._current_system:  str          = ""
-        self._current_profile: str          = "Default"
-        self._current_mode:    str          = "arcade"
-        self._current_btn_mode: int         = 8
-        self._profiles:        dict         = {"Default": {}}
-        self._main_widget:     Optional[QWidget] = None
-
-    def widget(self) -> QWidget:
-        if self._main_widget is None:
-            self._main_widget = self._build()
-        return self._main_widget
-
-    def load_data(self, config: dict):
-        self._config = config
-        if self._main_widget:
-            self._reload_systems()
-
-    def save_data(self) -> dict:
-        return {}
-
-    def _build(self) -> QWidget:
-        root = QWidget()
-        root.setStyleSheet(f"background:{_DEEP};")
-        rl = QVBoxLayout(root)
-        rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(0)
-        rl.addWidget(self._build_toolbar())
-
-        self._splitter = QSplitter(Qt.Orientation.Horizontal)
-        self._splitter.setHandleWidth(1)
-        self._splitter.setStyleSheet(f"QSplitter::handle{{background:{_BORDER};}}")
-
-        self._palette     = ActionPalette(ARCADE_ACTIONS)
-        self._editor_w    = self._build_editor()
-        self._right_panel = self._build_right_panel()
-
-        self._splitter.addWidget(self._palette)
-        self._splitter.addWidget(self._editor_w)
-        self._splitter.addWidget(self._right_panel)
-        self._splitter.setSizes([195, 820, 275])
-        self._splitter.setStretchFactor(0, 0)
-        self._splitter.setStretchFactor(1, 1)
-        self._splitter.setStretchFactor(2, 0)
-        rl.addWidget(self._splitter, 1)
-        return root
-
-    def _build_toolbar(self) -> QWidget:
-        bar = QWidget(); bar.setFixedHeight(52)
-        bar.setStyleSheet(f"background:{_DEEP};border-bottom:1px solid {_BORDER};")
-        lay = QHBoxLayout(bar)
-        lay.setContentsMargins(16, 0, 16, 0); lay.setSpacing(10)
-
-        dot = QLabel("●")
-        dot.setStyleSheet(f"font-size:10px;color:{_AMBER};background:transparent;")
-        title = QLabel("Controles")
-        title.setStyleSheet(
-            f"font-size:15px;font-weight:800;color:{_TXT_HI};background:transparent;")
-
-        lbl_sys = QLabel("Sistema:")
-        lbl_sys.setStyleSheet(
-            f"font-size:12px;font-weight:700;color:{_TXT_LO};background:transparent;")
-        self.cmb_system = QComboBox()
-        self.cmb_system.setMinimumWidth(180)
-        self.cmb_system.addItem("(todos los sistemas)")
-        self.cmb_system.currentTextChanged.connect(self._on_system_changed)
-
-        def mode_btn(text):
-            b = QPushButton(text); b.setCheckable(True); b.setFixedHeight(32)
-            b.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-            b.setStyleSheet(
-                f"QPushButton{{background:{_RAISED};color:{_TXT_MD};border:1px solid {_BORDER};"
-                f"border-radius:6px;padding:0 16px;font-weight:700;font-size:12px;}}"
-                f"QPushButton:hover{{background:#111520;color:{_TXT_HI};border-color:{_MID};}}"
-                f"QPushButton:checked{{background:#1a0e04;color:{_AMBER};border-color:{_AMBER};}}")
-            return b
-
-        def bm_btn(text, col):
-            b = QPushButton(text); b.setCheckable(True); b.setFixedHeight(28)
-            b.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-            b.setStyleSheet(
-                f"QPushButton{{background:{_RAISED};color:{_TXT_LO};border:1px solid {_BORDER};"
-                f"border-radius:5px;padding:0 14px;font-weight:800;font-size:11px;"
-                f"font-family:{_MONO};}}"
-                f"QPushButton:hover{{color:{_TXT_MD};border-color:{_MID};}}"
-                f"QPushButton:checked{{background:#0a1520;color:{col};border-color:{col};}}")
-            return b
-
-        self.btn_arcade  = mode_btn("Arcade")
-        self.btn_gamepad = mode_btn("Gamepad")
-        self.btn_arcade.setChecked(True)
-        self.btn_arcade.clicked.connect(lambda: self._set_mode("arcade"))
-        self.btn_gamepad.clicked.connect(lambda: self._set_mode("gamepad"))
-
-        self.btn_6btn = bm_btn("6 BTN", _GREEN)
-        self.btn_8btn = bm_btn("8 BTN", _CYAN)
-        self.btn_8btn.setChecked(True)
-        self.btn_6btn.clicked.connect(lambda: self._set_btn_mode(6))
-        self.btn_8btn.clicked.connect(lambda: self._set_btn_mode(8))
-
-        lbl_b = QLabel("Botonera:")
-        lbl_b.setStyleSheet(
-            f"font-size:12px;font-weight:700;color:{_TXT_LO};background:transparent;")
-
-        sep  = QFrame(); sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setFixedWidth(1); sep.setStyleSheet(f"background:{_BORDER};")
-        sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.VLine)
-        sep2.setFixedWidth(1); sep2.setStyleSheet(f"background:{_BORDER};")
-
-        lay.addWidget(dot); lay.addWidget(title); lay.addStretch()
-        lay.addWidget(lbl_sys); lay.addWidget(self.cmb_system)
-        lay.addWidget(sep)
-        lay.addWidget(self.btn_arcade); lay.addWidget(self.btn_gamepad)
-        lay.addWidget(sep2)
-        lay.addWidget(lbl_b)
-        lay.addWidget(self.btn_6btn); lay.addWidget(self.btn_8btn)
-        return bar
-
-    def _build_editor(self) -> QWidget:
-        w = QWidget(); w.setStyleSheet(f"background:{_BASE};")
-        lay = QVBoxLayout(w)
-        lay.setContentsMargins(12, 8, 12, 8); lay.setSpacing(6)
-
-        self.lbl_active = QLabel("Perfil: Default  |  Arcade  |  8 BTN")
-        self.lbl_active.setStyleSheet(
-            f"font-size:12px;font-weight:700;font-family:{_MONO};"
-            f"color:{_AMBER};background:transparent;")
-
-        self.arcade_layout  = ArcadeLayout(btn_mode=8)
-        self.gamepad_layout = GamepadLayout()
-        self.gamepad_layout.hide()
-
-        self.arcade_layout.slot_changed.connect(self._on_assignment_changed)
-        self.gamepad_layout.slot_changed.connect(self._on_assignment_changed)
-
-        lay.addWidget(self.lbl_active)
-        lay.addWidget(self.arcade_layout, 1)
-        lay.addWidget(self.gamepad_layout, 1)
-        return w
-
-    def _build_right_panel(self) -> QWidget:
-        w = QWidget(); w.setFixedWidth(275)
-        w.setStyleSheet(f"background:{_CARD};border-left:1px solid {_BORDER};")
-        lay = QVBoxLayout(w)
-        lay.setContentsMargins(12, 14, 12, 14); lay.setSpacing(10)
-
-        def sh(t):
-            l = QLabel(t); l.setFixedHeight(18)
-            l.setStyleSheet(
-                f"font-size:10px;font-weight:800;letter-spacing:1.5px;"
-                f"color:{_TXT_LO};font-family:{_MONO};background:transparent;")
-            return l
-
-        def sep():
-            f = QFrame(); f.setFrameShape(QFrame.Shape.HLine)
-            f.setFixedHeight(1); f.setStyleSheet(f"background:{_BORDER};border:none;")
-            return f
-
-        lay.addWidget(sh("PERFILES"))
-        pr = QHBoxLayout()
-        self.cmb_profile = QComboBox()
-        self.cmb_profile.addItem("Default")
-        self.cmb_profile.currentTextChanged.connect(self._on_profile_changed)
-        b_new = QPushButton("+"); b_new.setFixedSize(32, 32)
-        b_new.clicked.connect(self._new_profile)
-        b_del = QPushButton("-"); b_del.setFixedSize(32, 32)
-        b_del.setObjectName("btn_danger"); b_del.clicked.connect(self._delete_profile)
-        pr.addWidget(self.cmb_profile, 1); pr.addWidget(b_new); pr.addWidget(b_del)
-        lay.addLayout(pr)
-
-        for lbl, fn, obj in [
-            ("Guardar perfil",    self._save_profile,      "btn_success"),
-            ("Cargar .cfg",       self._load_profile_file, ""),
-            ("Exportar JoyToKey", self._export_joytokey,   "btn_primary"),
-            ("Limpiar todo",      self._clear_layout,      "btn_danger"),
-        ]:
-            b = QPushButton(lbl); b.setFixedHeight(32)
-            if obj: b.setObjectName(obj)
-            b.clicked.connect(fn); lay.addWidget(b)
-
-        lay.addWidget(sep())
-        lay.addWidget(sh("TEKNOPARROT"))
-        tp_r = QHBoxLayout()
-        self.inp_tp = QLineEdit()
-        self.inp_tp.setPlaceholderText("UserProfile .xml"); self.inp_tp.setFixedHeight(30)
-        b_tp = QPushButton("..."); b_tp.setFixedSize(30, 30); b_tp.clicked.connect(self._browse_tp)
-        tp_r.addWidget(self.inp_tp, 1); tp_r.addWidget(b_tp); lay.addLayout(tp_r)
-        b_tp_a = QPushButton("Aplicar en modulo RL")
-        b_tp_a.setObjectName("btn_primary"); b_tp_a.setFixedHeight(30)
-        b_tp_a.clicked.connect(self._apply_tp); lay.addWidget(b_tp_a)
-
-        lay.addWidget(sep())
-        lay.addWidget(sh("PCLAUNCHER"))
-        pc_r = QHBoxLayout()
-        self.inp_pc = QLineEdit()
-        self.inp_pc.setPlaceholderText("Ruta .exe del juego"); self.inp_pc.setFixedHeight(30)
-        b_pc = QPushButton("..."); b_pc.setFixedSize(30, 30); b_pc.clicked.connect(self._browse_pc)
-        pc_r.addWidget(self.inp_pc, 1); pc_r.addWidget(b_pc); lay.addLayout(pc_r)
-        b_pc_a = QPushButton("Aplicar en Games.ini")
-        b_pc_a.setObjectName("btn_primary"); b_pc_a.setFixedHeight(30)
-        b_pc_a.clicked.connect(self._apply_pc); lay.addWidget(b_pc_a)
-
-        lay.addWidget(sep())
-        lay.addWidget(sh("ASIGNACIONES"))
-        self.txt_summary = QTextEdit()
-        self.txt_summary.setReadOnly(True); self.txt_summary.setMinimumHeight(80)
-        self.txt_summary.setStyleSheet(
-            f"QTextEdit{{background:{_DEEP};border:1px solid {_BORDER};"
-            f"color:{_TXT_LO};font-family:{_MONO};font-size:11px;"
-            f"border-radius:6px;padding:6px;}}")
-        lay.addWidget(self.txt_summary, 1)
-        return w
-
-    # ── logica ───────────────────────────────────────────────────────────────
-    def _reload_systems(self):
-        scan = self._config.get("scan_results", {})
-        self._systems = scan.get("systems", [])
-        self.cmb_system.clear()
-        self.cmb_system.addItem("(todos los sistemas)")
-        for s in self._systems:
-            self.cmb_system.addItem(s)
-
-    def _on_system_changed(self, name):
-        self._current_system = "" if name == "(todos los sistemas)" else name
-        self._load_profiles_for_system()
-
-    def _get_profile_dir(self):
-        rl = self._config.get("rocketlauncher_dir", "")
-        if not rl: return ""
-        return os.path.join(rl, "Profiles", self._current_system or "_Global")
-
-    def _load_profiles_for_system(self):
-        self._profiles = {"Default": {}}
-        self.cmb_profile.clear(); self.cmb_profile.addItem("Default")
-        pd = self._get_profile_dir()
-        if pd and os.path.isdir(pd):
-            for f in sorted(os.listdir(pd)):
-                if f.endswith(".cfg"):
-                    name = f[:-4]
-                    try:
-                        with open(os.path.join(pd, f), encoding="utf-8") as fp:
-                            self._profiles[name] = json.load(fp)
-                        if name != "Default": self.cmb_profile.addItem(name)
-                    except Exception: pass
-        self._apply_profile("Default")
-
-    def _set_mode(self, mode):
-        self._current_mode = mode
-        is_a = mode == "arcade"
-        self.arcade_layout.setVisible(is_a)
-        self.gamepad_layout.setVisible(not is_a)
-        self.btn_arcade.setChecked(is_a)
-        self.btn_gamepad.setChecked(not is_a)
-        self.btn_6btn.setEnabled(is_a); self.btn_8btn.setEnabled(is_a)
-        new_pal = ActionPalette(ARCADE_ACTIONS if is_a else GAMEPAD_ACTIONS)
-        sp = self._splitter
-        idx = sp.indexOf(self._palette)
-        self._palette.setParent(None); self._palette.deleteLater()
-        self._palette = new_pal
-        sp.insertWidget(idx, self._palette)
-        sp.setSizes([195, 820, 275])
-        sp.setStretchFactor(0, 0); sp.setStretchFactor(1, 1); sp.setStretchFactor(2, 0)
-        self._update_label()
-
-    def _set_btn_mode(self, mode):
-        if mode == self._current_btn_mode: return
-        self._current_btn_mode = mode
-        self.btn_6btn.setChecked(mode == 6); self.btn_8btn.setChecked(mode == 8)
-        self.arcade_layout.set_btn_mode(mode); self._update_label()
-
-    def _on_assignment_changed(self, sid, action): self._update_summary()
-
-    def _update_label(self):
-        sys_l  = self._current_system or "Todos"
-        mode_l = "Arcade" if self._current_mode == "arcade" else "Gamepad"
-        btn_l  = f"  |  {self._current_btn_mode} BTN" if self._current_mode == "arcade" else ""
-        self.lbl_active.setText(
-            f"Sistema: {sys_l}  |  Perfil: {self._current_profile}  |  {mode_l}{btn_l}")
-
-    def _update_summary(self):
-        lay = self.arcade_layout if self._current_mode == "arcade" else self.gamepad_layout
-        lines = [f"{sid:<22} -> {act}"
-                 for sid, act in sorted(lay.get_assignments().items()) if act]
-        self.txt_summary.setText("\n".join(lines) if lines else "(sin asignaciones)")
-
-    def _on_profile_changed(self, name):
-        if name:
-            self._current_profile = name
-            self._apply_profile(name); self._update_label()
-
-    def _apply_profile(self, name):
-        data = self._profiles.get(name, {})
-        mode = data.get("_mode", "arcade")
-        self._set_mode(mode)
-        asgn = {k: v for k, v in data.items() if not k.startswith("_")}
-        lay = self.arcade_layout if mode == "arcade" else self.gamepad_layout
-        lay.set_assignments(asgn); self._update_summary()
-
-    def _save_profile(self):
-        name = self.cmb_profile.currentText()
-        lay  = self.arcade_layout if self._current_mode == "arcade" else self.gamepad_layout
-        data = lay.get_assignments()
-        data["_mode"] = self._current_mode; data["_system"] = self._current_system
-        self._profiles[name] = data
-        pd = self._get_profile_dir()
-        if pd:
-            os.makedirs(pd, exist_ok=True)
-            path = os.path.join(pd, f"{name}.cfg")
-            try:
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2, ensure_ascii=False)
-                self._save_joytokey()
-                if self.parent:
-                    self.parent.statusBar().showMessage(f"Perfil '{name}' guardado.", 4000)
-            except Exception as e:
-                QMessageBox.critical(self.parent, "Error", str(e))
-
-    def _save_joytokey(self):
-        sn = (self._current_system or "").strip()
-        rl = (self._config.get("rocketlauncher_dir", "") or "").strip()
-        if not sn or not rl: return
-        joy_dir = os.path.join(rl, "Profiles", "JoyToKey", sn)
-        cfg_p   = os.path.join(joy_dir, f"{sn}.cfg")
-        content = make_joytokey_cfg(sn)
-        os.makedirs(joy_dir, exist_ok=True)
-        if os.path.isfile(cfg_p):
-            try:
-                with open(cfg_p, encoding="utf-8", errors="ignore") as f:
-                    if f.read() == content: return
-                ok = QMessageBox.question(
-                    self.parent, "JoyToKey existente",
-                    f"Ya existe:\n{cfg_p}\n\nSobrescribir?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                    QMessageBox.StandardButton.Cancel)
-                if ok != QMessageBox.StandardButton.Yes: return
-            except Exception: return
-        with open(cfg_p, "w", encoding="utf-8") as f: f.write(content)
-
-    def _new_profile(self):
-        name, ok = QInputDialog.getText(self.parent, "Nuevo perfil", "Nombre:")
-        if ok and name.strip():
-            name = name.strip(); self._profiles[name] = {}
-            if self.cmb_profile.findText(name) < 0: self.cmb_profile.addItem(name)
-            self.cmb_profile.setCurrentText(name)
-
-    def _delete_profile(self):
-        name = self.cmb_profile.currentText()
-        if name == "Default":
-            QMessageBox.warning(self.parent, "No permitido", "No se puede eliminar 'Default'.")
+        self._joysticks: dict[int, any] = {}
+        self._axis_vals: dict[int, list] = {}
+        self._running = False
+        self._timer = QTimer(self)
+        self._timer.setInterval(16)   # ~60 Hz
+        self._timer.timeout.connect(self._poll)
+
+    def start(self):
+        self._running = True
+        self._timer.start()
+        self._scan_devices()
+
+    def stop(self):
+        self._running = False
+        self._timer.stop()
+
+    def _scan_devices(self):
+        if not PYGAME_OK:
+            self.devices_changed.emit(["Teclado (sin pygame)"])
             return
-        r = QMessageBox.question(
-            self.parent, "Eliminar", f"Eliminar '{name}'?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
-        if r == QMessageBox.StandardButton.Yes:
-            self.cmb_profile.removeItem(self.cmb_profile.currentIndex())
-            self._profiles.pop(name, None)
-            pd = self._get_profile_dir()
-            if pd:
-                p = os.path.join(pd, f"{name}.cfg")
-                if os.path.isfile(p): os.remove(p)
+        pygame.joystick.quit()
+        pygame.joystick.init()
+        names = ["Teclado"]
+        for i in range(pygame.joystick.get_count()):
+            js = pygame.joystick.Joystick(i)
+            js.init()
+            self._joysticks[i] = js
+            self._axis_vals[i] = [0.0] * max(js.get_numaxes(), 4)
+            names.append(f"Mando {i+1} — {js.get_name()}")
+        self.devices_changed.emit(names)
 
-    def _load_profile_file(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self.parent, "Cargar perfil", "", "Perfil (*.cfg);;JSON (*.json)")
-        if not path: return
-        try:
-            with open(path, encoding="utf-8") as f: data = json.load(f)
-            name = Path(path).stem; self._profiles[name] = data
-            if self.cmb_profile.findText(name) < 0: self.cmb_profile.addItem(name)
-            self.cmb_profile.setCurrentText(name); self._apply_profile(name)
-        except Exception as e:
-            QMessageBox.critical(self.parent, "Error", str(e))
+    def _poll(self):
+        if not PYGAME_OK:
+            return
+        # re-escanear si cambia el nº de mandos
+        count = pygame.joystick.get_count()
+        if count != len(self._joysticks):
+            self._scan_devices()
+            return
 
-    def _export_joytokey(self):
-        lay = self.arcade_layout if self._current_mode == "arcade" else self.gamepad_layout
-        asgn = lay.get_assignments()
-        if not asgn:
-            QMessageBox.information(self.parent, "Sin asignaciones", "No hay asignaciones."); return
-        path, _ = QFileDialog.getSaveFileName(
-            self.parent, "Exportar JoyToKey",
-            f"{self._current_profile}_{self._current_mode}.cfg", "JoyToKey (*.cfg)")
-        if not path: return
-        lines = [f"; HyperSpin Manager - JoyToKey", "", "[config]", "FileVersion=2", ""]
-        for i, (sid, act) in enumerate(sorted(asgn.items()), 1):
-            if act and act != "---":
-                lines += [f"[Button_{i}]", f"Slot={sid}", f"Action={act}", ""]
-        try:
-            with open(path, "w", encoding="utf-8") as f: f.write("\n".join(lines))
-            if self.parent: self.parent.statusBar().showMessage(f"Exportado: {path}", 5000)
-        except Exception as e:
-            QMessageBox.critical(self.parent, "Error", str(e))
+        for event in pygame.event.get():
+            if event.type == pygame.JOYBUTTONDOWN:
+                name = self._btn_name(event.joy, event.button)
+                self.button_event.emit(event.joy, name, True)
+            elif event.type == pygame.JOYBUTTONUP:
+                name = self._btn_name(event.joy, event.button)
+                self.button_event.emit(event.joy, name, False)
+            elif event.type == pygame.JOYAXISMOTION:
+                jid = event.joy
+                ax = event.axis
+                val = event.value
+                if jid in self._axis_vals:
+                    avs = self._axis_vals[jid]
+                    if ax < len(avs):
+                        avs[ax] = val
+                    # ejes 0,1 = stick izq; 2,3 = stick der (layout estándar SDL)
+                    lx = avs[0] if len(avs) > 0 else 0.0
+                    ly = avs[1] if len(avs) > 1 else 0.0
+                    rx = avs[3] if len(avs) > 3 else (avs[2] if len(avs) > 2 else 0.0)
+                    ry = avs[4] if len(avs) > 4 else (avs[3] if len(avs) > 3 else 0.0)
+                    self.axis_event.emit(jid, "left",  lx, ly)
+                    self.axis_event.emit(jid, "right", rx, ry)
+            elif event.type == pygame.JOYHATMOTION:
+                jid = event.joy
+                hx, hy = event.value
+                self.button_event.emit(jid, "dpad_left",  hx == -1)
+                self.button_event.emit(jid, "dpad_right", hx ==  1)
+                self.button_event.emit(jid, "dpad_up",    hy ==  1)
+                self.button_event.emit(jid, "dpad_down",  hy == -1)
 
-    def _clear_layout(self):
-        r = QMessageBox.question(
-            self.parent, "Limpiar", "Eliminar todas las asignaciones?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
-        if r == QMessageBox.StandardButton.Yes:
-            lay = self.arcade_layout if self._current_mode == "arcade" else self.gamepad_layout
-            lay.clear_all(); self._update_summary()
+    # Mapa botones SDL estándar → nombre del mando Xbox
+    _BTN_MAP = {
+        0: "btn_a", 1: "btn_b", 2: "btn_x",  3: "btn_y",
+        4: "lb",    5: "rb",
+        6: "select", 7: "start",
+        8: "home",
+        9: "ls",   10: "rs",
+    }
 
-    def _browse_tp(self):
-        p, _ = QFileDialog.getOpenFileName(
-            self.parent, "UserProfile TeknoParrot",
-            self._config.get("rocketlauncher_dir", ""), "XML (*.xml);;Todos (*.*)")
-        if p: self.inp_tp.setText(p)
+    def _btn_name(self, jid: int, btn: int) -> str:
+        return self._BTN_MAP.get(btn, f"btn_{btn}")
 
-    def _apply_tp(self):
-        tp = self.inp_tp.text().strip()
-        rl = self._config.get("rocketlauncher_dir", "")
-        sn = self._current_system
-        if not sn or not tp:
-            QMessageBox.warning(self.parent, "Datos incompletos", "Selecciona sistema y perfil TP."); return
-        emu_ini = os.path.join(rl, "Settings", sn, "Emulators.ini")
-        if not os.path.isfile(emu_ini):
-            QMessageBox.warning(self.parent, "Sin Emulators.ini", f"No encontrado:\n{emu_ini}"); return
-        cfg = configparser.RawConfigParser()
-        cfg.read(emu_ini, encoding="utf-8")
-        any((cfg.set(s, "UserProfile", tp) or True) for s in cfg.sections() if "tekno" in s.lower())
-        with open(emu_ini, "w", encoding="utf-8") as f: cfg.write(f)
-        if self.parent: self.parent.statusBar().showMessage("UserProfile TeknoParrot actualizado.", 5000)
 
-    def _browse_pc(self):
-        p, _ = QFileDialog.getOpenFileName(
-            self.parent, "Ejecutable", "", "Ejecutables (*.exe);;Todos (*.*)")
-        if p: self.inp_pc.setText(p)
+# ══════════════════════════════════════════════════════════════════════════════
+#  EventLog — panel inferior con log de eventos
+# ══════════════════════════════════════════════════════════════════════════════
 
-    def _apply_pc(self):
-        exe = self.inp_pc.text().strip()
-        rl  = self._config.get("rocketlauncher_dir", "")
-        sn  = self._current_system
-        if not sn or not exe:
-            QMessageBox.warning(self.parent, "Datos incompletos", "Selecciona sistema y ejecutable."); return
-        games_ini = os.path.join(rl, "Settings", sn, "Games.ini")
-        os.makedirs(os.path.dirname(games_ini), exist_ok=True)
-        cfg = configparser.RawConfigParser()
-        if os.path.isfile(games_ini): cfg.read(games_ini, encoding="utf-8")
-        if not cfg.has_section(sn): cfg.add_section(sn)
-        cfg.set(sn, "Exe_Path", exe)
-        with open(games_ini, "w", encoding="utf-8") as f: cfg.write(f)
-        if self.parent:
-            self.parent.statusBar().showMessage(f"Exe_Path actualizado en {games_ini}", 5000)
+class EventLog(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(90)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(8, 4, 8, 4)
+        lay.setSpacing(2)
+        hdr = QLabel("EVENTOS DE ENTRADA")
+        hdr.setStyleSheet(
+            f"font-family:'Consolas','Courier New',monospace;"
+            f"font-size:10px;font-weight:800;letter-spacing:2px;"
+            f"color:{_TXT_GH};background:transparent;")
+        lay.addWidget(hdr)
+        self._lines: list[QLabel] = []
+        for _ in range(4):
+            lbl = QLabel("")
+            lbl.setStyleSheet(
+                f"font-family:'Consolas','Courier New',monospace;"
+                f"font-size:11px;color:{_AMBER};background:transparent;")
+            lay.addWidget(lbl)
+            self._lines.append(lbl)
+        self._history: list[str] = []
+
+    def log(self, msg: str):
+        self._history.append(msg)
+        if len(self._history) > 4:
+            self._history = self._history[-4:]
+        for i, lbl in enumerate(self._lines):
+            if i < len(self._history):
+                lbl.setText(self._history[-(i+1)])
+            else:
+                lbl.setText("")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ControllerTesterWidget — widget principal
+# ══════════════════════════════════════════════════════════════════════════════
+
+class ControllerTesterWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setStyleSheet(f"QWidget{{background:{_BG};color:{_TXT_HI};}}")
+        self._selected_jid = -1   # -1 = teclado
+        self._build_ui()
+        self._bridge = InputBridge(self)
+        self._bridge.button_event.connect(self._on_btn)
+        self._bridge.axis_event.connect(self._on_axis)
+        self._bridge.devices_changed.connect(self._on_devices)
+        self._bridge.start()
+        # re-escanear periódicamente
+        self._scan_timer = QTimer(self)
+        self._scan_timer.setInterval(3000)
+        self._scan_timer.timeout.connect(self._bridge._scan_devices)
+        self._scan_timer.start()
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 12, 16, 12)
+        root.setSpacing(10)
+
+        # ── Barra superior ─────────────────────────────────────────────────
+        top = QHBoxLayout()
+        top.setSpacing(10)
+
+        title = QLabel("PROBADOR DE MANDOS")
+        title.setStyleSheet(
+            f"font-size:15px;font-weight:800;letter-spacing:3px;"
+            f"color:{_AMBER};font-family:'Consolas','Courier New',monospace;")
+        top.addWidget(title)
+        top.addStretch()
+
+        # indicador pygame
+        if PYGAME_OK:
+            status_col = _GREEN
+            status_txt = "● SDL2/pygame activo"
+        else:
+            status_col = _RED
+            status_txt = "⚠ pygame no disponible — solo teclado"
+        lbl_status = QLabel(status_txt)
+        lbl_status.setStyleSheet(
+            f"font-size:11px;color:{status_col};"
+            f"font-family:'Consolas','Courier New',monospace;")
+        top.addWidget(lbl_status)
+
+        # selector de mando
+        lbl_dev = QLabel("Dispositivo:")
+        lbl_dev.setStyleSheet(f"font-size:12px;color:{_TXT_LO};")
+        top.addWidget(lbl_dev)
+
+        self._cmb = QComboBox()
+        self._cmb.setMinimumWidth(260)
+        self._cmb.setStyleSheet(
+            f"QComboBox{{background:#0d1018;border:1px solid {_BORDER};"
+            f"border-radius:6px;color:{_TXT_HI};font-size:12px;padding:4px 10px;}}"
+            f"QComboBox::drop-down{{border:none;width:18px;}}"
+            f"QComboBox QAbstractItemView{{background:#0d1018;border:1px solid {_BORDER};"
+            f"color:{_TXT_HI};selection-background-color:{_MID};}}")
+        self._cmb.addItem("Teclado")
+        self._cmb.currentIndexChanged.connect(self._on_device_selected)
+        top.addWidget(self._cmb)
+
+        btn_refresh = QPushButton("⟳ Actualizar")
+        btn_refresh.setFixedHeight(30)
+        btn_refresh.setStyleSheet(
+            f"QPushButton{{background:{_MID};border:1px solid {_BORDER};"
+            f"border-radius:6px;color:{_TXT_HI};font-size:11px;padding:0 12px;}}"
+            f"QPushButton:hover{{background:{_BORDER};color:{_AMBER};}}")
+        btn_refresh.clicked.connect(self._bridge._scan_devices)
+        top.addWidget(btn_refresh)
+
+        root.addLayout(top)
+
+        # ── Separador ─────────────────────────────────────────────────────
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet(f"color:{_BORDER};")
+        root.addWidget(sep)
+
+        # ── Área central: mando + sticks ───────────────────────────────────
+        center = QHBoxLayout()
+        center.setSpacing(12)
+
+        # Stick izquierdo
+        self._stick_l = StickWidget("L")
+        center.addWidget(self._stick_l, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # Mando Xbox
+        self._controller = XboxControllerWidget()
+        center.addWidget(self._controller, 1)
+
+        # Stick derecho
+        self._stick_r = StickWidget("R")
+        center.addWidget(self._stick_r, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        root.addLayout(center, 1)
+
+        # ── Log de eventos ─────────────────────────────────────────────────
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setStyleSheet(f"color:{_BORDER};")
+        root.addWidget(sep2)
+
+        self._log = EventLog()
+        root.addWidget(self._log)
+
+        # ── Info teclado ───────────────────────────────────────────────────
+        info = QLabel(
+            "Teclado → A=A  B=S  X=D  Y=W  LB=Q  RB=E  LT=Z  RT=C  "
+            "Select=Tab  Start=Intro  Home=H  D-pad=↑↓←→  LS-clic=F  RS-clic=G")
+        info.setStyleSheet(
+            f"font-size:10px;color:{_TXT_GH};"
+            f"font-family:'Consolas','Courier New',monospace;")
+        info.setWordWrap(True)
+        root.addWidget(info)
+
+    # ── Slots ──────────────────────────────────────────────────────────────
+    def _on_devices(self, names: list):
+        current = self._cmb.currentText()
+        self._cmb.blockSignals(True)
+        self._cmb.clear()
+        self._cmb.addItems(names)
+        idx = self._cmb.findText(current)
+        if idx >= 0:
+            self._cmb.setCurrentIndex(idx)
+        self._cmb.blockSignals(False)
+
+    def _on_device_selected(self, idx: int):
+        # idx 0 = teclado, idx 1+ = mando 0,1,...
+        self._selected_jid = idx - 1
+
+    def _on_btn(self, jid: int, name: str, pressed: bool):
+        if jid != self._selected_jid:
+            return
+        self._controller.set_button(name, pressed)
+        state = "▼" if pressed else "▲"
+        self._log.log(f"[Mando {jid+1}] {name} {state}")
+
+    def _on_axis(self, jid: int, stick: str, x: float, y: float):
+        if jid != self._selected_jid:
+            return
+        if stick == "left":
+            self._stick_l.set_pos(x, y)
+            self._controller.set_axis("left", x, y)
+        else:
+            self._stick_r.set_pos(x, y)
+            self._controller.set_axis("right", x, y)
+
+    # ── Teclado ────────────────────────────────────────────────────────────
+    _KEY_MAP = {
+        Qt.Key.Key_A:      "btn_a",
+        Qt.Key.Key_B:      "btn_b",   # remapeo práctico → S para B
+        Qt.Key.Key_S:      "btn_b",
+        Qt.Key.Key_X:      "btn_x",
+        Qt.Key.Key_D:      "btn_x",
+        Qt.Key.Key_W:      "btn_y",
+        Qt.Key.Key_Y:      "btn_y",
+        Qt.Key.Key_Q:      "lb",
+        Qt.Key.Key_E:      "rb",
+        Qt.Key.Key_Z:      "lt",
+        Qt.Key.Key_C:      "rt",
+        Qt.Key.Key_Tab:    "select",
+        Qt.Key.Key_Return: "start",
+        Qt.Key.Key_H:      "home",
+        Qt.Key.Key_Up:     "dpad_up",
+        Qt.Key.Key_Down:   "dpad_down",
+        Qt.Key.Key_Left:   "dpad_left",
+        Qt.Key.Key_Right:  "dpad_right",
+        Qt.Key.Key_F:      "ls",
+        Qt.Key.Key_G:      "rs",
+    }
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if self._selected_jid != -1:
+            return
+        if event.isAutoRepeat():
+            return
+        name = self._KEY_MAP.get(event.key())
+        if name:
+            self._controller.set_button(name, True)
+            self._log.log(f"[Teclado] {name} ▼  (tecla {event.text() or event.key().name})")
+
+    def keyReleaseEvent(self, event: QKeyEvent):
+        if self._selected_jid != -1:
+            return
+        if event.isAutoRepeat():
+            return
+        name = self._KEY_MAP.get(event.key())
+        if name:
+            self._controller.set_button(name, False)
+            self._log.log(f"[Teclado] {name} ▲")
+
+    def closeEvent(self, event):
+        self._bridge.stop()
+        if PYGAME_OK:
+            pygame.quit()
+        super().closeEvent(event)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Main
+# ══════════════════════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+
+    win = QWidget()
+    win.setWindowTitle("Controller Tester — HyperSpin Manager")
+    win.setMinimumSize(820, 640)
+    win.setStyleSheet(f"QWidget{{background:{_BG};}}")
+
+    lay = QVBoxLayout(win)
+    lay.setContentsMargins(0, 0, 0, 0)
+    tester = ControllerTesterWidget()
+    lay.addWidget(tester)
+
+    win.show()
+    sys.exit(app.exec())
