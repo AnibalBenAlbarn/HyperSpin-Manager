@@ -28,10 +28,10 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget,
     QVBoxLayout, QLabel, QMessageBox, QStatusBar,
-    QAction, QMenu, QMenuBar
+    QMenu, QMenuBar
 )
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QAction, QFont
 
 # ─── Constantes ───────────────────────────────────────────────────────────────
 APP_NAME    = "HyperSpin Manager"
