@@ -612,8 +612,8 @@ class ControllerTesterWidget(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setStyleSheet(f"QWidget{{background:{_BG};color:{_TXT_HI};}}")
         self._selected_jid = -1   # -1 = teclado
-        self._build_ui()
         self._bridge = InputBridge(self)
+        self._build_ui()
         self._bridge.button_event.connect(self._on_btn)
         self._bridge.axis_event.connect(self._on_axis)
         self._bridge.devices_changed.connect(self._on_devices)
