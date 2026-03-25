@@ -898,8 +898,8 @@ class ControllerTesterWidget(QWidget):
 
     def _on_category_changed(self):
         self._current_category = "arcade" if self._cmb_category.currentIndex() == 0 else "consola"
+
         self._center_stack.setCurrentIndex(0 if self._current_category == "arcade" else 1)
-        self._restore_slot_state()
 
     def _on_slot_changed(self):
         self._current_slot = self._cmb_slot.currentText() or "1"
@@ -1083,8 +1083,9 @@ class ControllerTesterWidget(QWidget):
         self._cmb_slot.blockSignals(True)
         self._cmb_slot.setCurrentText(self._current_slot)
         self._cmb_slot.blockSignals(False)
+
         self._center_stack.setCurrentIndex(0 if self._current_category == "arcade" else 1)
-        self._restore_slot_state()
+
 
 
 class ControlsTab(TabModule):
