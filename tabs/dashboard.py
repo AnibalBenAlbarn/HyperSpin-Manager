@@ -61,7 +61,7 @@ def _css_card(border_accent: str = "") -> str:
 
 def _sep() -> QFrame:
     f = QFrame()
-    f.setFrameShape(QFrame.HLine)
+    f.setFrameShape(QFrame.Shape.HLine)
     f.setFixedHeight(1)
     f.setStyleSheet(f"background: {_CARD_BORDER}; border: none;")
     return f
@@ -78,7 +78,7 @@ class StatCard(QFrame):
         super().__init__(parent)
         self._color = color
         self._show_bar = show_bar
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(100)
         self.setStyleSheet(_css_card(border_accent=color))
 
@@ -158,7 +158,7 @@ class PathIndicator(QWidget):
         self._path_lbl = QLabel(path or "(no configurado)")
         self._path_lbl.setStyleSheet(
             f"font-size: 11px; font-family: {_MONO}; color: {_TEXT_LOW}; background: transparent;")
-        self._path_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._path_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._path_lbl.setWordWrap(False)
 
         lay.addWidget(self._dot)
@@ -281,7 +281,7 @@ class DashboardTab(TabModule):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(f"background: {_DEEP}; border: none;")
 
@@ -455,7 +455,7 @@ class DashboardTab(TabModule):
         # Scroll
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setFixedHeight(200)
         scroll.setStyleSheet("background: transparent; border: none;")
 

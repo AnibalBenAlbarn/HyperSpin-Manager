@@ -133,7 +133,7 @@ class MainMenuTab(TabModule):
 
         for b in [self.btn_mm_to_mmc, self.btn_mm_to_classic, self.btn_mm_sync]:
             b.setFixedHeight(28)
-            b.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+            b.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
 
         self.btn_mm_to_mmc.clicked.connect(self._mainmenu_convert_to_mmc)
         self.btn_mm_to_classic.clicked.connect(self._mainmenu_convert_to_classic)
