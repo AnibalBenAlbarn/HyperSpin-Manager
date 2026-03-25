@@ -2155,7 +2155,7 @@ class SystemManagerTab(TabModule):
         for i in range(2, len(GCOLS)):
             self.games_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
         self.games_table.setSortingEnabled(True)
-        self.games_table.setEditTriggers(QAbstractItemView.DoubleClicked)
+        self.games_table.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
         self.games_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.games_table.itemChanged.connect(self._on_game_item_changed)
         self.games_table.itemSelectionChanged.connect(self._on_games_selection_changed)
@@ -3629,7 +3629,7 @@ class SystemManagerTab(TabModule):
             chips_lay.addWidget(chip)
             if key != "warnings":
                 sep = QFrame()
-                sep.setFrameShape(QFrame.VLine)
+                sep.setFrameShape(QFrame.Shape.VLine)
                 sep.setFixedWidth(1)
                 sep.setStyleSheet("background:#1e2330;")
                 chips_lay.addWidget(sep)

@@ -296,7 +296,7 @@ class SetupWizard(QDialog):
             dot.setStyleSheet(
                 f"font-size: 10px; font-weight: 700; color: {self._TXT_GH}; "
                 f"padding: 0 8px; letter-spacing: 0.8px; background: transparent;")
-            dot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            dot.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             self._step_dots.append(dot)
             s_lay.addWidget(dot)
             if i < len(labels) - 1:
@@ -573,7 +573,7 @@ class SetupWizard(QDialog):
             val_lbl.setStyleSheet(
                 f"font-size: 11px; font-family: 'Consolas', monospace; "
                 f"color: {self._TXT_MD}; background: transparent;")
-            val_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            val_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
             rl.addWidget(dot)
             rl.addWidget(lbl_key)
@@ -853,7 +853,7 @@ class ConfigurationTab(TabModule):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(f"background: {self._DEEP}; border: none;")
 
@@ -1142,7 +1142,7 @@ class ConfigurationTab(TabModule):
             card.setStyleSheet(
                 f"QFrame {{ background: #07090f; border: 1px solid {self._BORDER}; "
                 f"border-left: 3px solid {color}; border-radius: 6px; }}")
-            card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             cl = QVBoxLayout(card)
             cl.setContentsMargins(12, 8, 12, 8)
             cl.setSpacing(2)

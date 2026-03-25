@@ -1429,7 +1429,7 @@ class CreateSystemTab(TabModule):
     def _build_form(self) -> QWidget:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         content = QWidget()
@@ -1521,7 +1521,7 @@ class CreateSystemTab(TabModule):
         mod_row = QHBoxLayout()
         self.cmb_module = QComboBox()
         self.cmb_module.setEditable(True)
-        self.cmb_module.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.cmb_module.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_refresh_mods = QPushButton("↻")
         btn_refresh_mods.setFixedWidth(28)
         btn_refresh_mods.setFixedHeight(30)
