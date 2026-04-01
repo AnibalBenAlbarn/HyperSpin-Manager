@@ -22,6 +22,7 @@ import os
 import json
 import traceback
 import logging
+import faulthandler
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -324,9 +325,11 @@ QDialog { background-color: #0d0f14; }
 """
 
 logger = logging.getLogger("hyperspin_manager")
+_fault_file_handle = None
 
 
 def setup_logging(debug: bool = False):
+    global _fault_file_handle
     level = logging.DEBUG if debug else logging.INFO
     logger.setLevel(level)
     logger.handlers.clear()
@@ -338,9 +341,20 @@ def setup_logging(debug: bool = False):
     logger.addHandler(file_handler)
 
     stream_handler = logging.StreamHandler(sys.stderr)
-    stream_handler.setLevel(logging.WARNING)
+    stream_handler.setLevel(level)
     stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)
+
+    # Captura crashes nativos (por ejemplo SDL/pygame) para diagnosticar cierres
+    # abruptos como 0xC0000409 en Windows.
+    try:
+        if _fault_file_handle and not _fault_file_handle.closed:
+            _fault_file_handle.close()
+        _fault_file_handle = open(LOG_FILE, "a", encoding="utf-8")
+        faulthandler.enable(file=_fault_file_handle, all_threads=True)
+        logger.debug("faulthandler habilitado en %s", LOG_FILE)
+    except OSError as e:
+        logger.warning("No se pudo habilitar faulthandler: %s", e)
 
 
 def load_theme_stylesheet(theme: str, custom_qss: str = "") -> str:

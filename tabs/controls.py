@@ -11,6 +11,7 @@ Probador de mandos — PyQt6
 import sys
 import math
 import threading
+import logging
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QPushButton, QFrame, QSizePolicy, QStackedWidget
@@ -43,6 +44,10 @@ try:
     PYGAME_OK = True
 except Exception:
     PYGAME_OK = False
+
+logger = logging.getLogger("hyperspin_manager.controls")
+if not PYGAME_OK:
+    logger.exception("pygame no pudo inicializarse; la pestaña Controles usará solo teclado.")
 
 # ─── Paleta ──────────────────────────────────────────────────────────────────
 _BG       = "#0a0c10"
@@ -580,69 +585,97 @@ class InputBridge(QObject):
         self._timer = QTimer(self)
         self._timer.setInterval(16)   # ~60 Hz
         self._timer.timeout.connect(self._poll)
+        self._last_device_count = -1
 
     def start(self):
+        logger.info("InputBridge.start()")
         self._running = True
         self._timer.start()
         self._scan_devices()
 
     def stop(self):
+        logger.info("InputBridge.stop()")
         self._running = False
         self._timer.stop()
 
     def _scan_devices(self):
         if not PYGAME_OK:
+            logger.warning("Scan de dispositivos omitido: pygame no disponible.")
             self.devices_changed.emit(["Teclado (sin pygame)"])
             return
-        pygame.joystick.quit()
-        pygame.joystick.init()
-        names = ["Teclado"]
-        for i in range(pygame.joystick.get_count()):
-            js = pygame.joystick.Joystick(i)
-            js.init()
-            self._joysticks[i] = js
-            self._axis_vals[i] = [0.0] * max(js.get_numaxes(), 4)
-            names.append(f"Mando {i+1} — {js.get_name()}")
-        self.devices_changed.emit(names)
+        try:
+            pygame.joystick.quit()
+            pygame.joystick.init()
+            self._joysticks.clear()
+            self._axis_vals.clear()
+            names = ["Teclado"]
+            count = pygame.joystick.get_count()
+            logger.info("Scan de mandos: detectados=%s", count)
+            for i in range(count):
+                js = pygame.joystick.Joystick(i)
+                js.init()
+                self._joysticks[i] = js
+                self._axis_vals[i] = [0.0] * max(js.get_numaxes(), 4)
+                names.append(f"Mando {i+1} — {js.get_name()}")
+                logger.info(
+                    "Mando %s inicializado: nombre='%s', axes=%s, buttons=%s, hats=%s",
+                    i,
+                    js.get_name(),
+                    js.get_numaxes(),
+                    js.get_numbuttons(),
+                    js.get_numhats(),
+                )
+            self._last_device_count = count
+            self.devices_changed.emit(names)
+        except Exception:
+            logger.exception("Fallo durante _scan_devices().")
+            self.devices_changed.emit(["Teclado (error pygame)"])
 
     def _poll(self):
         if not PYGAME_OK:
             return
-        # re-escanear si cambia el nº de mandos
-        count = pygame.joystick.get_count()
-        if count != len(self._joysticks):
-            self._scan_devices()
-            return
+        try:
+            # re-escanear si cambia el nº de mandos
+            count = pygame.joystick.get_count()
+            if count != self._last_device_count:
+                logger.info("Cambio de dispositivos detectado: %s -> %s", self._last_device_count, count)
+                self._scan_devices()
+                return
 
-        for event in pygame.event.get():
-            if event.type == pygame.JOYBUTTONDOWN:
-                name = self._btn_name(event.joy, event.button)
-                self.button_event.emit(event.joy, name, True)
-            elif event.type == pygame.JOYBUTTONUP:
-                name = self._btn_name(event.joy, event.button)
-                self.button_event.emit(event.joy, name, False)
-            elif event.type == pygame.JOYAXISMOTION:
-                jid = event.joy
-                ax = event.axis
-                val = event.value
-                if jid in self._axis_vals:
-                    avs = self._axis_vals[jid]
-                    if ax < len(avs):
-                        avs[ax] = val
-                    # ejes 0,1 = stick izq; 2,3 = stick der (layout estándar SDL)
-                    lx = avs[0] if len(avs) > 0 else 0.0
-                    ly = avs[1] if len(avs) > 1 else 0.0
-                    rx = avs[3] if len(avs) > 3 else (avs[2] if len(avs) > 2 else 0.0)
-                    ry = avs[4] if len(avs) > 4 else (avs[3] if len(avs) > 3 else 0.0)
-                    self.axis_event.emit(jid, "left",  lx, ly)
-                    self.axis_event.emit(jid, "right", rx, ry)
-            elif event.type == pygame.JOYHATMOTION:
-                jid = event.joy
-                hx, hy = event.value
-                self.button_event.emit(jid, "dpad_left",  hx == -1)
-                self.button_event.emit(jid, "dpad_right", hx ==  1)
-                self.button_event.emit(jid, "dpad_up",    hy ==  1)
-                self.button_event.emit(jid, "dpad_down",  hy == -1)
+            for event in pygame.event.get():
+                if event.type == pygame.JOYBUTTONDOWN:
+                    name = self._btn_name(event.joy, event.button)
+                    logger.debug("JOYBUTTONDOWN jid=%s button=%s mapped=%s", event.joy, event.button, name)
+                    self.button_event.emit(event.joy, name, True)
+                elif event.type == pygame.JOYBUTTONUP:
+                    name = self._btn_name(event.joy, event.button)
+                    logger.debug("JOYBUTTONUP jid=%s button=%s mapped=%s", event.joy, event.button, name)
+                    self.button_event.emit(event.joy, name, False)
+                elif event.type == pygame.JOYAXISMOTION:
+                    jid = event.joy
+                    ax = event.axis
+                    val = event.value
+                    if jid in self._axis_vals:
+                        avs = self._axis_vals[jid]
+                        if ax < len(avs):
+                            avs[ax] = val
+                        # ejes 0,1 = stick izq; 2,3 = stick der (layout estándar SDL)
+                        lx = avs[0] if len(avs) > 0 else 0.0
+                        ly = avs[1] if len(avs) > 1 else 0.0
+                        rx = avs[3] if len(avs) > 3 else (avs[2] if len(avs) > 2 else 0.0)
+                        ry = avs[4] if len(avs) > 4 else (avs[3] if len(avs) > 3 else 0.0)
+                        self.axis_event.emit(jid, "left",  lx, ly)
+                        self.axis_event.emit(jid, "right", rx, ry)
+                elif event.type == pygame.JOYHATMOTION:
+                    jid = event.joy
+                    hx, hy = event.value
+                    logger.debug("JOYHATMOTION jid=%s value=(%s,%s)", jid, hx, hy)
+                    self.button_event.emit(jid, "dpad_left",  hx == -1)
+                    self.button_event.emit(jid, "dpad_right", hx == 1)
+                    self.button_event.emit(jid, "dpad_up",    hy == 1)
+                    self.button_event.emit(jid, "dpad_down",  hy == -1)
+        except Exception:
+            logger.exception("Excepción en InputBridge._poll().")
 
     # Mapa botones SDL estándar → nombre del mando Xbox
     _BTN_MAP = {
@@ -879,6 +912,7 @@ class ControllerTesterWidget(QWidget):
 
     # ── Slots ──────────────────────────────────────────────────────────────
     def _on_devices(self, names: list):
+        logger.info("Dispositivos actualizados en UI: %s", names)
         self._known_devices = names[:] if names else ["Teclado"]
         current = self._cmb.currentText()
         self._cmb.blockSignals(True)
@@ -893,6 +927,7 @@ class ControllerTesterWidget(QWidget):
     def _on_device_selected(self, idx: int):
         # idx 0 = teclado, idx 1+ = mando 0,1,...
         self._selected_jid = idx - 1
+        logger.info("Dispositivo seleccionado: idx=%s, jid=%s, nombre='%s'", idx, self._selected_jid, self._cmb.currentText())
         self._device_by_slot[self._current_category][self._current_slot] = self._cmb.currentText()
         self._update_active_profile_label()
 
@@ -955,6 +990,7 @@ class ControllerTesterWidget(QWidget):
         self._set_arcade_from_console_button(name, pressed)
         state = "▼" if pressed else "▲"
         cat = "Arcade" if self._current_category == "arcade" else "Consola"
+        logger.info("Entrada botón: cat=%s slot=%s jid=%s name=%s pressed=%s", cat, self._current_slot, jid, name, pressed)
         self._log.log(f"[{cat} M{self._current_slot}] {name} {state}")
 
     def _on_axis(self, jid: int, stick: str, x: float, y: float):
@@ -1029,6 +1065,7 @@ class ControllerTesterWidget(QWidget):
         name = self._KEY_MAP.get(event.key())
         if name:
             self._controller.set_button(name, True)
+            logger.info("Entrada teclado DOWN: key=%s mapped=%s", event.key(), name)
             self._log.log(f"[Teclado] {name} ▼  (tecla {event.text() or event.key().name})")
 
     def keyReleaseEvent(self, event: QKeyEvent):
@@ -1039,11 +1076,13 @@ class ControllerTesterWidget(QWidget):
         name = self._KEY_MAP.get(event.key())
         if name:
             self._controller.set_button(name, False)
+            logger.info("Entrada teclado UP: key=%s mapped=%s", event.key(), name)
             self._log.log(f"[Teclado] {name} ▲")
 
     def closeEvent(self, event):
         self._bridge.stop()
         if PYGAME_OK:
+            logger.info("Cerrando pestaña de controles: pygame.quit()")
             pygame.quit()
         super().closeEvent(event)
 
